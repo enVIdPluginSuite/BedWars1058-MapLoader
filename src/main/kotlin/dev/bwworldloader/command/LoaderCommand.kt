@@ -177,6 +177,7 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
         s.sendMessage(title("Loaded arenas"))
         s.sendMessage(line("Idle unload", "${if (cfg.idleUnloadMinutes <= 0) "off" else "${cfg.idleUnloadMinutes} min"}${ChatColor.GRAY}, mode ${cfg.mode}, " +
             "warm per group ${cfg.warmPerGroup}${if (cfg.groupOverrides.isNotEmpty()) " (overrides: ${cfg.groupOverrides})" else ""}"))
+        if (rt.pool.refillPaused) s.sendMessage(line("Warm pool", "${ChatColor.YELLOW}paused by /bwloader sleep until a player joins an arena or you reload"))
         val rows = rt.pool.sleepReport()
         if (rows.isEmpty()) s.sendMessage(ChatColor.GRAY.toString() + "No arena is loaded right now.")
         rows.take(40).forEach { s.sendMessage(ChatColor.GRAY.toString() + " ▪ " + it) }
@@ -198,6 +199,12 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
         }
         val n = plugin.runSleep(plan, force)
         s.sendMessage(ok("Sent $n arena(s) to sleep; their world copies are removed from the server root and the arenas are listed again (they wake up when someone joins)."))
+        val warm = rt.settingsService.settings.loading
+        if (warm.warmPerGroup > 0 || warm.groupOverrides.isNotEmpty()) {
+            s.sendMessage(ChatColor.YELLOW.toString() + "Note: warm-arenas-per-group is ${warm.warmPerGroup}" +
+                (if (warm.groupOverrides.isNotEmpty()) " (overrides ${warm.groupOverrides})" else "") +
+                ", so that many arenas per group load again as soon as a player asks for one. Set it to 0 to keep everything asleep.")
+        }
         if (!force && plan.busy.isNotEmpty()) {
             s.sendMessage(ChatColor.YELLOW.toString() + "${plan.busy.size} arena(s) in use were left alone ($busyPlayers player(s)). Add force to include them.")
         }

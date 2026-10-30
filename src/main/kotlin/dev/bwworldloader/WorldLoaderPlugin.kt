@@ -240,6 +240,7 @@ class WorldLoaderPlugin : JavaPlugin() {
             logger.info("Mode is EAGER: loading $n parked arena(s).")
         }
         rt.pool.syncListing()
+        rt.pool.resumeRefill()
         rt.pool.requestRefill()
     }
 
@@ -460,6 +461,7 @@ class WorldLoaderPlugin : JavaPlugin() {
     fun runSleep(plan: SleepPlan, includeBusy: Boolean): Int {
         val rt = services ?: return 0
         var n = 0
+        rt.pool.pauseRefill() // do not immediately wake the warm pool again
         val all = if (includeBusy) plan.idle + plan.busy else plan.idle
         for (a in all) {
             try {

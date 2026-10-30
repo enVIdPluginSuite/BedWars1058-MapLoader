@@ -64,6 +64,25 @@ class ArenaPool(
 
     private val pending = ArrayList<PendingJoin>()
 
+    /**
+     * Set by `/bwloader sleep`: the warm pool is not topped up again until a player asks for an arena (or the
+     * settings change), otherwise the arenas that were just put to sleep would be woken straight away.
+     */
+    @Volatile
+    var refillPaused = false
+        private set
+
+    fun pauseRefill() {
+        refillPaused = true
+    }
+
+    fun resumeRefill() {
+        if (refillPaused) {
+            refillPaused = false
+            requestRefill()
+        }
+    }
+
     /** Parked arenas currently shown in BedWars' arena list as "waiting" ("ghosts": they have no world yet). */
     private val listed: MutableSet<IArena> = Collections.newSetFromMap(IdentityHashMap())
 
@@ -192,7 +211,7 @@ class ArenaPool(
 
     /** Wakes up parked arenas until every group has its configured number of joinable arenas. */
     fun refill() {
-        if (bw.isShuttingDown() || !lazyActive() || cold.isEmpty()) return
+        if (bw.isShuttingDown() || !lazyActive() || cold.isEmpty() || refillPaused) return
         val loadingSettings = settings().loading
         val groups = cold.values.map { it.arena.group }.distinctBy { it.lowercase(Locale.ROOT) }
         for (g in groups) {
@@ -352,6 +371,7 @@ class ArenaPool(
     fun joinListed(player: Player, a: IArena) {
         // `/bw join random` offers several arenas in a row: only the first one is taken
         if (pending.any { it.player == player.uniqueId }) return
+        refillPaused = false
         // A party member is pulled along by the party leader's join, so only the leader waits.
         try {
             val party = bw.api.partyUtil
@@ -441,6 +461,7 @@ class ArenaPool(
     fun requestJoin(player: Player, target: String, command: String): Boolean {
         val jit = settings().loading.jitJoin
         val key = target.lowercase(Locale.ROOT)
+        refillPaused = false
         val deadline = System.currentTimeMillis() + jit.timeoutSeconds * 1000L
 
         val parked = cold[key]
