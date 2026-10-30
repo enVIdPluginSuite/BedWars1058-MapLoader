@@ -14,7 +14,7 @@ import java.util.Locale
 /** `/bwloader` - status, reload, in-game config editing and map migration. */
 class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, TabCompleter {
 
-    private val subcommands = listOf("help", "status", "reload", "config", "scan", "activate", "sleep", "disable", "enable", "migrate", "restore")
+    private val subcommands = listOf("help", "status", "reload", "config", "scan", "activate", "arenas", "sleep", "disable", "enable", "migrate", "restore")
 
     override fun onCommand(sender: CommandSender, command: Command, label: String, args: Array<out String>): Boolean {
         if (!sender.hasPermission("bw1058maploader.admin")) {
@@ -38,6 +38,7 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
             "activate" -> activate(sender, args.getOrNull(1))
             "migrate" -> migrate(sender, args.getOrNull(1)?.equals("confirm", ignoreCase = true) == true)
             "restore" -> restore(sender, label, args.drop(1))
+            "arenas" -> arenasReport(sender)
             "sleep" -> sleep(sender, label, args.drop(1))
             "disable" -> disable(sender, label, args.drop(1))
             "enable" -> enable(sender, label, args.drop(1))
@@ -61,6 +62,7 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
             "config set <key> <value>" to "Change a setting (saved + applied now)",
             "scan" to "Re-read the map library folder",
             "activate <arena>" to "Load a parked arena right now",
+            "arenas" to "Show every loaded arena and when/why it will (not) go to sleep",
             "sleep [idle|all|<arena>] [force]" to "Put loaded arenas back into the library now (idle ones; force also removes players)",
             "disable <arena|all> [confirm]" to "Unload arena(s) (kicks players) so their maps can be moved",
             "enable <arena|all>" to "Bring disabled arena(s) back",
@@ -167,6 +169,18 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
             return
         }
         plugin.runMigration(plan, s)
+    }
+
+    private fun arenasReport(s: CommandSender) {
+        val rt = plugin.services ?: return
+        val cfg = rt.settingsService.settings.loading
+        s.sendMessage(title("Loaded arenas"))
+        s.sendMessage(line("Idle unload", "${if (cfg.idleUnloadMinutes <= 0) "off" else "${cfg.idleUnloadMinutes} min"}${ChatColor.GRAY}, mode ${cfg.mode}, " +
+            "warm per group ${cfg.warmPerGroup}${if (cfg.groupOverrides.isNotEmpty()) " (overrides: ${cfg.groupOverrides})" else ""}"))
+        val rows = rt.pool.sleepReport()
+        if (rows.isEmpty()) s.sendMessage(ChatColor.GRAY.toString() + "No arena is loaded right now.")
+        rows.take(40).forEach { s.sendMessage(ChatColor.GRAY.toString() + " ▪ " + it) }
+        if (rows.size > 40) s.sendMessage(ChatColor.GRAY.toString() + " ... and ${rows.size - 40} more")
     }
 
     private fun sleep(s: CommandSender, label: String, args: List<String>) {

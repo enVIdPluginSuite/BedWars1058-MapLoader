@@ -369,6 +369,29 @@ class ArenaPool(
 
     // --- idle unload ---
 
+    /** Why each loaded arena is (not) going to sleep; shown by `/bwloader arenas`. */
+    fun sleepReport(): List<String> {
+        val now = System.currentTimeMillis()
+        val s = settings().loading
+        val out = ArrayList<String>()
+        val real = bw.arenaUtil.arenas.filter { it !in listed }.sortedBy { it.arenaName.lowercase(Locale.ROOT) }
+        for (a in real) {
+            val key = a.arenaName.lowercase(Locale.ROOT)
+            val busy = a.status != GameState.waiting || a.players.isNotEmpty() || a.spectators.isNotEmpty() ||
+                a in loading || pending.any { it.arenaKey == key }
+            val idleMin = if (busy) 0L else (now - (lastBusy[a] ?: now)) / 60_000L
+            val verdict = when {
+                !lazyActive() -> "never: loading.mode is not LAZY (or this is a BungeeCord server)"
+                s.idleUnloadMinutes <= 0 -> "never: loading.idle-unload-minutes is 0"
+                busy -> "in use (${a.status}, ${a.players.size} player(s))"
+                openCount(a.group) <= s.warmFor(a.group) -> "kept loaded: inside warm-arenas-per-group (${s.warmFor(a.group)}) of group ${a.group}"
+                else -> "idle ${idleMin} min, sleeps after ${s.idleUnloadMinutes} min"
+            }
+            out += "${a.arenaName} [${a.group}]: $verdict"
+        }
+        return out
+    }
+
     private fun unloadIdle(now: Long) {
         val minutes = settings().loading.idleUnloadMinutes
         if (minutes <= 0 || !lazyActive() || bw.isShuttingDown()) return
@@ -393,7 +416,7 @@ class ArenaPool(
             var open = openCount(g)
             for ((a, _) in list.sortedBy { it.second }) {
                 if (open <= settings().loading.warmFor(g)) break
-                debug("Unloading idle arena '${a.arenaName}'")
+                log.info("Putting idle arena '${a.arenaName}' to sleep (unused for ${minutes}+ min).")
                 lastBusy.remove(a)
                 open--
                 try {

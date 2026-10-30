@@ -9,7 +9,7 @@ Fixes slow startups and freezes on BedWars1058 servers with hundreds of arena wo
 * Existing worlds in the root are moved into the library on first use (`storage.import-from-root`) or all at once with `/bwloader migrate confirm`.
 
 ## Install
-1. Put `BedWars1058-MapLoader-3.2.0.jar` in `plugins/` next to BedWars1058 (required).
+1. Put `BedWars1058-MapLoader-3.3.0.jar` in `plugins/` next to BedWars1058 (required).
 2. Start once, edit `plugins/BedWars1058-MapLoader/config.yml` (or use commands), run `/bwloader migrate`, then `/bwloader migrate confirm`.
 
 ## Commands (permission `bw1058maploader.admin`, aliases `/bwl`)
@@ -37,5 +37,8 @@ Example: `/bwloader config set storage.path /srv/mc/shared_maps`, `/bwloader con
 ## Compatibility
 Spigot/Paper 1.8 – 26.x (compiled against 1.8.8 API, 1.13+ void generator loaded by reflection). Java 11+ runtime for the plugin itself (use whatever your server needs; 26.x needs Java 25).
 
-## Licensing
-This project is licensed under the MIT License. Check the [LICENSE](LICENSE) file for more information
+## Developer note
+This plugin is coded with AI assistance and architected completely by me. Regardless, use at your own risk.
+
+## License
+This plugin is under the MIT License, check the [License](LICENSE) file for more details.
