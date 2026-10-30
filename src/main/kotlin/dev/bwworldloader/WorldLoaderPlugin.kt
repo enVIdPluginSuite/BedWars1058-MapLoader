@@ -342,4 +342,136 @@ class WorldLoaderPlugin : JavaPlugin() {
             }
         }
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Disable / enable arenas (so their maps can be moved while the server runs)
+    // ---------------------------------------------------------------------------------------------
+
+    data class DisablePlan(val loaded: List<String>, val parked: List<String>, val busy: List<String>, val notFound: List<String>, val players: Int)
+
+    /** Arenas that were disabled with /bwloader disable and not enabled again yet (until the next restart). */
+    private val disabledArenas: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    fun disabledArenaNames(): List<String> = disabledArenas.sorted()
+
+    /** Names of every arena BedWars knows right now (loaded, parked, loading). */
+    fun knownArenaNames(): List<String> {
+        val rt = services ?: return emptyList()
+        val names = LinkedHashSet<String>()
+        rt.bw.arenas.forEach { names += it.arenaName }
+        rt.pool.coldNames().forEach { names += it }
+        rt.bw.queue.forEach { names += it.arenaName }
+        return names.sortedBy { it.lowercase(Locale.ROOT) }
+    }
+
+    /** [target] is an arena name or "all". */
+    fun planDisable(target: String): DisablePlan {
+        val rt = services ?: return DisablePlan(emptyList(), emptyList(), emptyList(), emptyList(), 0)
+        val names = if (target.equals("all", ignoreCase = true)) knownArenaNames()
+        else listOf(knownArenaNames().firstOrNull { it.equals(target, ignoreCase = true) } ?: target)
+        val loaded = ArrayList<String>()
+        val parked = ArrayList<String>()
+        val busy = ArrayList<String>()
+        val missing = ArrayList<String>()
+        var players = 0
+        for (name in names) {
+            val real = rt.bw.arenas.firstOrNull { it.arenaName.equals(name, ignoreCase = true) && !rt.pool.isListed(it) }
+            when {
+                rt.pool.listedByName(name) != null || (rt.pool.coldNames().any { it.equals(name, true) } && real == null) -> parked += name
+                real != null -> {
+                    loaded += name
+                    players += real.players.size + real.spectators.size
+                }
+                rt.bw.queue.any { it.arenaName.equals(name, ignoreCase = true) } -> busy += name
+                else -> missing += name
+            }
+        }
+        return DisablePlan(loaded, parked, busy, missing, players)
+    }
+
+    fun runDisable(plan: DisablePlan): Int {
+        val rt = services ?: return 0
+        var done = 0
+        for (name in plan.parked) {
+            if (rt.pool.disableListed(name)) {
+                disabledArenas += name
+                done++
+            }
+        }
+        for (name in plan.loaded) {
+            val a = rt.bw.arenas.firstOrNull { it.arenaName.equals(name, ignoreCase = true) && !rt.pool.isListed(it) } ?: continue
+            try {
+                a.disable() // BedWars kicks the players, calls our adapter (world unloaded + copy deleted) and forgets the arena
+                disabledArenas += name
+                done++
+            } catch (ex: Exception) {
+                logger.warning("Could not disable arena '$name': ${ex.message}")
+            }
+        }
+        return done
+    }
+
+    /** Registers disabled arenas with BedWars again. [target] is an arena name or "all". Returns how many were enabled. */
+    fun enableArenas(target: String): List<String> {
+        val rt = services ?: return emptyList()
+        val configured = rt.takeover.configuredArenaNames()
+        val names = if (target.equals("all", ignoreCase = true)) (disabledArenas.toList() + configured).distinct()
+        else listOf(configured.firstOrNull { it.equals(target, ignoreCase = true) } ?: return emptyList())
+        val known = knownArenaNames().map { it.lowercase(Locale.ROOT) }.toSet()
+        val enabled = ArrayList<String>()
+        for (name in names) {
+            if (name.lowercase(Locale.ROOT) in known) continue
+            try {
+                rt.pool.expectParking(name)
+                rt.bw.arenaUtil.loadArena(name, null)
+                rt.pool.settleExpectation(name)
+                disabledArenas.removeIf { it.equals(name, ignoreCase = true) }
+                enabled += name
+            } catch (ex: Exception) {
+                logger.warning("Could not enable arena '$name': ${ex.message}")
+            }
+        }
+        rt.pool.requestRefill()
+        return enabled
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Sleep: put loaded arenas back into the library right now (they stay listed and wake up on demand)
+    // ---------------------------------------------------------------------------------------------
+
+    data class SleepPlan(val idle: List<com.andrei1058.bedwars.api.arena.IArena>, val busy: List<com.andrei1058.bedwars.api.arena.IArena>)
+
+    /** [target] is "idle"/"all" or an arena name. */
+    fun planSleep(target: String): SleepPlan {
+        val rt = services ?: return SleepPlan(emptyList(), emptyList())
+        val real = rt.bw.arenas.filter { !rt.pool.isListed(it) }
+        val chosen = if (target.equals("idle", true) || target.equals("all", true)) real
+        else real.filter { it.arenaName.equals(target, ignoreCase = true) }
+        val idle = ArrayList<com.andrei1058.bedwars.api.arena.IArena>()
+        val busy = ArrayList<com.andrei1058.bedwars.api.arena.IArena>()
+        for (a in chosen) {
+            val isIdle = a.status == com.andrei1058.bedwars.api.arena.GameState.waiting && a.players.isEmpty() && a.spectators.isEmpty()
+            if (isIdle) idle += a else busy += a
+        }
+        return SleepPlan(idle, busy)
+    }
+
+    /** Sends the arenas to sleep: world unloaded, runtime copy deleted, arena parked and listed again. */
+    fun runSleep(plan: SleepPlan, includeBusy: Boolean): Int {
+        val rt = services ?: return 0
+        var n = 0
+        val all = if (includeBusy) plan.idle + plan.busy else plan.idle
+        for (a in all) {
+            try {
+                for (p in a.players.toList()) a.removePlayer(p, false)
+                for (p in a.spectators.toList()) a.removeSpectator(p, false)
+                a.restart() // -> our adapter deletes the copy and re-registers the arena, which is then parked
+                n++
+            } catch (ex: Exception) {
+                logger.warning("Could not put arena '${a.arenaName}' to sleep: ${ex.message}")
+            }
+        }
+        rt.pool.touch()
+        return n
+    }
 }

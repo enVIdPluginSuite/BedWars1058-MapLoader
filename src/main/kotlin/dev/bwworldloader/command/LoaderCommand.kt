@@ -14,7 +14,7 @@ import java.util.Locale
 /** `/bwloader` - status, reload, in-game config editing and map migration. */
 class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, TabCompleter {
 
-    private val subcommands = listOf("help", "status", "reload", "config", "scan", "activate", "migrate", "restore")
+    private val subcommands = listOf("help", "status", "reload", "config", "scan", "activate", "sleep", "disable", "enable", "migrate", "restore")
 
     override fun onCommand(sender: CommandSender, command: Command, label: String, args: Array<out String>): Boolean {
         if (!sender.hasPermission("bw1058maploader.admin")) {
@@ -38,6 +38,9 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
             "activate" -> activate(sender, args.getOrNull(1))
             "migrate" -> migrate(sender, args.getOrNull(1)?.equals("confirm", ignoreCase = true) == true)
             "restore" -> restore(sender, label, args.drop(1))
+            "sleep" -> sleep(sender, label, args.drop(1))
+            "disable" -> disable(sender, label, args.drop(1))
+            "enable" -> enable(sender, label, args.drop(1))
             else -> {
                 sender.sendMessage(err("Unknown subcommand '${args[0]}'."))
                 help(sender, label)
@@ -58,6 +61,9 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
             "config set <key> <value>" to "Change a setting (saved + applied now)",
             "scan" to "Re-read the map library folder",
             "activate <arena>" to "Load a parked arena right now",
+            "sleep [idle|all|<arena>] [force]" to "Put loaded arenas back into the library now (idle ones; force also removes players)",
+            "disable <arena|all> [confirm]" to "Unload arena(s) (kicks players) so their maps can be moved",
+            "enable <arena|all>" to "Bring disabled arena(s) back",
             "migrate [confirm]" to "Move arena maps from the server root into the library",
             "restore <arena|all> [move] [confirm]" to "Put maps back into the server root (stock BedWars1058 layout)",
         )) {
@@ -163,6 +169,53 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
         plugin.runMigration(plan, s)
     }
 
+    private fun sleep(s: CommandSender, label: String, args: List<String>) {
+        val rt = plugin.services ?: return
+        if (!rt.pool.lazyActive()) {
+            return s.sendMessage(err("Sleeping needs loading.mode LAZY (in EAGER mode / on BungeeCord an arena would simply load again)."))
+        }
+        val force = args.any { it.equals("force", true) }
+        val target = args.firstOrNull { !it.equals("force", true) } ?: "idle"
+        val plan = plugin.planSleep(target)
+        if (plan.idle.isEmpty() && plan.busy.isEmpty()) return s.sendMessage(err("No loaded arena matches '$target'."))
+        val busyPlayers = plan.busy.sumOf { it.players.size + it.spectators.size }
+        if (!force && plan.idle.isEmpty() && plan.busy.isNotEmpty()) {
+            return s.sendMessage(err("${plan.busy.size} arena(s) are in use ($busyPlayers player(s)). Add force to send them to sleep anyway."))
+        }
+        val n = plugin.runSleep(plan, force)
+        s.sendMessage(ok("Sent $n arena(s) to sleep; their world copies are removed from the server root and the arenas are listed again (they wake up when someone joins)."))
+        if (!force && plan.busy.isNotEmpty()) {
+            s.sendMessage(ChatColor.YELLOW.toString() + "${plan.busy.size} arena(s) in use were left alone ($busyPlayers player(s)). Add force to include them.")
+        }
+    }
+
+    private fun disable(s: CommandSender, label: String, args: List<String>) {
+        val target = args.firstOrNull { !it.equals("confirm", true) }
+            ?: return s.sendMessage(err("Usage: /$label disable <arena|all> [confirm]"))
+        val confirm = args.any { it.equals("confirm", true) }
+        val plan = plugin.planDisable(target)
+        s.sendMessage(title("Disable arenas"))
+        s.sendMessage(line("Loaded", "${plan.loaded.size} (${plan.players} player(s) will be removed)" +
+            if (plan.loaded.isNotEmpty()) ": " + plan.loaded.take(8).joinToString(", ") + if (plan.loaded.size > 8) ", ..." else "" else ""))
+        s.sendMessage(line("Parked", "${plan.parked.size}"))
+        if (plan.busy.isNotEmpty()) s.sendMessage(line("Busy loading", "${plan.busy.size} (try again in a moment): " + plan.busy.take(8).joinToString(", ")))
+        if (plan.notFound.isNotEmpty()) s.sendMessage(line("Not found", plan.notFound.joinToString(", ")))
+        if (plan.loaded.isEmpty() && plan.parked.isEmpty()) return s.sendMessage(err("Nothing to disable."))
+        if (!confirm) {
+            s.sendMessage(ChatColor.YELLOW.toString() + "Run /$label disable $target confirm to do it. Disabled arenas stay off until /$label enable or a restart.")
+            return
+        }
+        val n = plugin.runDisable(plan)
+        s.sendMessage(ok("Disabled $n arena(s). Their worlds are unloaded in the background; then /$label migrate or /$label restore can move the maps."))
+    }
+
+    private fun enable(s: CommandSender, label: String, args: List<String>) {
+        val target = args.firstOrNull() ?: return s.sendMessage(err("Usage: /$label enable <arena|all>"))
+        val enabled = plugin.enableArenas(target)
+        if (enabled.isEmpty()) s.sendMessage(err("Nothing to enable (already active, or no such arena config)."))
+        else s.sendMessage(ok("Enabled ${enabled.size} arena(s)" + if (enabled.size <= 8) ": " + enabled.joinToString(", ") else "."))
+    }
+
     private fun restore(s: CommandSender, label: String, args: List<String>) {
         val target = args.firstOrNull { !it.equals("move", true) && !it.equals("confirm", true) }
             ?: return s.sendMessage(err("Usage: /$label restore <arena|all> [move] [confirm]"))
@@ -198,6 +251,11 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
                 else -> emptyList()
             }
             args[0].equals("activate", true) && args.size == 2 -> rt.pool.coldNames() + "all"
+            args[0].equals("sleep", true) && args.size == 2 -> listOf("idle", "all") + plugin.knownArenaNames()
+            args[0].equals("sleep", true) -> listOf("force")
+            args[0].equals("disable", true) && args.size == 2 -> plugin.knownArenaNames() + "all"
+            args[0].equals("disable", true) -> listOf("confirm")
+            args[0].equals("enable", true) && args.size == 2 -> plugin.disabledArenaNames() + "all"
             args[0].equals("restore", true) && args.size == 2 -> rt.store.names() + "all"
             args[0].equals("restore", true) -> listOf("move", "confirm")
             args[0].equals("migrate", true) && args.size == 2 -> listOf("confirm")

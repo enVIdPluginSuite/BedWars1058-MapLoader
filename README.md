@@ -9,7 +9,7 @@ Fixes slow startups and freezes on BedWars1058 servers with hundreds of arena wo
 * Existing worlds in the root are moved into the library on first use (`storage.import-from-root`) or all at once with `/bwloader migrate confirm`.
 
 ## Install
-1. Put `BedWars1058-MapLoader-3.0.0.jar` in `plugins/` next to BedWars1058 (required).
+1. Put `BedWars1058-MapLoader-3.2.0.jar` in `plugins/` next to BedWars1058 (required).
 2. Start once, edit `plugins/BedWars1058-MapLoader/config.yml` (or use commands), run `/bwloader migrate`, then `/bwloader migrate confirm`.
 
 ## Commands (permission `bw1058maploader.admin`, aliases `/bwl`)
@@ -22,6 +22,8 @@ Fixes slow startups and freezes on BedWars1058 servers with hundreds of arena wo
 | `/bwloader activate <arena>` | wake a parked arena manually |
 | `/bwloader migrate [confirm]` | move root worlds into the library |
 | `/bwloader restore <arena\|all> [move] [confirm]` | put maps back into the server root as normal world folders (for stock BedWars1058). Copies by default; `move` removes them from the library. Never overwrites existing folders |
+| `/bwloader sleep [idle\|all\|<arena>] [force]` | put loaded arenas back to sleep right now: world unloaded, copy deleted from the server root, arena stays listed and wakes up on join. Only idle arenas unless `force` (which removes players first). LAZY mode only |
+| `/bwloader disable <arena\|all> [confirm]` | unload arena(s) (players are removed, worlds unloaded and copies deleted) so their maps can be moved/restored while the server runs; `enable <arena\|all>` brings them back. Disabled arenas also stay off until a restart |
 | `/bwloader activate <arena\|all>` | load parked arena(s) now |
 
 Example: `/bwloader config set storage.path /srv/mc/shared_maps`, `/bwloader config set loading.group-overrides.Solo 4`.
@@ -34,12 +36,6 @@ Example: `/bwloader config set storage.path /srv/mc/shared_maps`, `/bwloader con
 
 ## Compatibility
 Spigot/Paper 1.8 – 26.x (compiled against 1.8.8 API, 1.13+ void generator loaded by reflection). Java 11+ runtime for the plugin itself (use whatever your server needs; 26.x needs Java 25).
-
-## Build
-`gradle shadowJar` (Kotlin 2.2.21, JDK 17+). BedWars1058 API resolves from `-PbedwarsApiJar=<jar>`, then `./libs/*.jar`, then the andrei1058 Maven repo. Output: `build/libs/BedWarsWorldLoader-1.0.0.jar`.
-
-## Developer note
-This is partially AI-generated, though I wrote most of the code myself. Regardless, use at your own risk.
 
 ## Licensing
 This project is licensed under the MIT License. Check the [LICENSE](LICENSE) file for more information
