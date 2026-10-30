@@ -1,5 +1,5 @@
 name: BedWars1058-MapLoader
-main: dev.bwworldloader.WorldLoaderPlugin
+main: dev.etran.WorldLoaderPlugin
 version: ${version}
 # Ignored by 1.8 - 1.12 servers; on 1.13+ it keeps Bukkit from applying legacy material support.
 api-version: '1.13'

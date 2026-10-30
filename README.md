@@ -9,7 +9,7 @@ Fixes slow startups and freezes on BedWars1058 servers with hundreds of arena wo
 * Existing worlds in the root are moved into the library on first use (`storage.import-from-root`) or all at once with `/bwloader migrate confirm`.
 
 ## Install
-1. Put `BedWars1058-MapLoader-3.5.0.jar` in `plugins/` next to BedWars1058 (required).
+1. Put `BedWars1058-MapLoader-3.5.1.jar` in `plugins/` next to BedWars1058 (required).
 2. Start once, edit `plugins/BedWars1058-MapLoader/config.yml` (or use commands), run `/bwloader migrate`, then `/bwloader migrate confirm`.
 
 ## Commands (permission `bw1058maploader.admin`, aliases `/bwl`)
