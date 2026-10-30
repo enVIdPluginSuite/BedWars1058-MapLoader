@@ -47,8 +47,8 @@ data class LoadingSettings(
     val stallTimeoutSeconds: Int = 60,
     /** Keep parked arenas visible (waiting) in BedWars' arena list, GUIs and /bw join random. */
     val listParkedArenas: Boolean = true,
-    /** Arenas without players are unloaded again after this many minutes (0 = never). */
-    val idleUnloadMinutes: Int = 5,
+    /** Arenas without players are unloaded again after this many seconds (0 = never). */
+    val idleUnloadSeconds: Int = 300,
     val jitJoin: JitJoinSettings = JitJoinSettings(),
 ) {
     /** Number of joinable arenas to keep ready for [group]. */
@@ -133,7 +133,7 @@ object SettingsParser {
             ioThreads = p.int("loading.io-threads", d.loading.ioThreads, 1, 16),
             stallTimeoutSeconds = p.int("loading.stall-timeout-seconds", d.loading.stallTimeoutSeconds, 0, 3600),
             listParkedArenas = p.bool("loading.list-parked-arenas", d.loading.listParkedArenas),
-            idleUnloadMinutes = p.int("loading.idle-unload-minutes", d.loading.idleUnloadMinutes, 0, 1440),
+            idleUnloadSeconds = idleSeconds(raw, p, d.loading.idleUnloadSeconds),
             jitJoin = jit,
         )
 
@@ -152,6 +152,18 @@ object SettingsParser {
 
         val settings = LoaderSettings(storage, loading, world, messages, p.bool("debug", d.debug))
         return ParseOutcome(settings, p.problems)
+    }
+
+    /** `loading.idle-unload-seconds`; a config written by an earlier build only has `idle-unload-minutes`, which is converted. */
+    private fun idleSeconds(raw: RawConfig, p: Collector, def: Int): Int {
+        if (raw.get("loading.idle-unload-seconds") == null) {
+            val minutes = raw.get("loading.idle-unload-minutes")
+            if (minutes != null) {
+                val n = (minutes as? Number)?.toInt() ?: minutes.toString().trim().toIntOrNull()
+                if (n != null && n in 0..1440) return n * 60
+            }
+        }
+        return p.int("loading.idle-unload-seconds", def, 0, 86400)
     }
 
     private class Collector(private val raw: RawConfig) {

@@ -175,9 +175,9 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
         val rt = plugin.services ?: return
         val cfg = rt.settingsService.settings.loading
         s.sendMessage(title("Loaded arenas"))
-        s.sendMessage(line("Idle unload", "${if (cfg.idleUnloadMinutes <= 0) "off" else "${cfg.idleUnloadMinutes} min"}${ChatColor.GRAY}, mode ${cfg.mode}, " +
+        s.sendMessage(line("Idle unload", "${if (cfg.idleUnloadSeconds <= 0) "off" else "${cfg.idleUnloadSeconds} s"}${ChatColor.GRAY}, mode ${cfg.mode}, " +
             "warm per group ${cfg.warmPerGroup}${if (cfg.groupOverrides.isNotEmpty()) " (overrides: ${cfg.groupOverrides})" else ""}"))
-        if (rt.pool.refillPaused) s.sendMessage(line("Warm pool", "${ChatColor.YELLOW}paused by /bwloader sleep until a player joins an arena or you reload"))
+        if (rt.pool.refillPaused) s.sendMessage(line("Warm pool", "${ChatColor.YELLOW}paused by /bwloader sleep: only the group of an arena someone wakes is topped up, until you reload"))
         val rows = rt.pool.sleepReport()
         if (rows.isEmpty()) s.sendMessage(ChatColor.GRAY.toString() + "No arena is loaded right now.")
         rows.take(40).forEach { s.sendMessage(ChatColor.GRAY.toString() + " ▪ " + it) }

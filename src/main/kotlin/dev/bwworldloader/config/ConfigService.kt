@@ -162,7 +162,7 @@ class ConfigService(private val plugin: JavaPlugin) {
             "loading.register-per-tick" -> s.loading.registerPerTick.toString()
             "loading.io-threads" -> s.loading.ioThreads.toString()
             "loading.list-parked-arenas" -> s.loading.listParkedArenas.toString()
-            "loading.idle-unload-minutes" -> s.loading.idleUnloadMinutes.toString()
+            "loading.idle-unload-seconds" -> s.loading.idleUnloadSeconds.toString()
             "loading.stall-timeout-seconds" -> s.loading.stallTimeoutSeconds.toString()
             "loading.jit-join.enabled" -> s.loading.jitJoin.enabled.toString()
             "loading.jit-join.commands" -> s.loading.jitJoin.commands.joinToString(", ")

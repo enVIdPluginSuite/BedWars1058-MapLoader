@@ -52,9 +52,9 @@ loading:
   # it has been loaded once; other plugins that read the arena list can see parked arenas without a world.)
   list-parked-arenas: true
 
-  # An arena nobody is using (waiting, no players) is unloaded again after this many minutes and becomes a
+  # An arena nobody is using (waiting, no players) is unloaded again after this many seconds and becomes a
   # parked, listed arena again. Arenas inside the warm-arenas-per-group count are kept. 0 = never unload.
-  idle-unload-minutes: 5
+  idle-unload-seconds: 300
 
   # Different numbers for specific groups, e.g.   Solo: 4
   # (or in-game: /bwloader config set loading.group-overrides.Solo 4)

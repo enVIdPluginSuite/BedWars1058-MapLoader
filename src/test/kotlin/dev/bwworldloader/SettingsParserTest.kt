@@ -23,7 +23,7 @@ class SettingsParserTest {
         assertEquals("bedwars_worlds", out.settings.storage.path)
         assertEquals(0, out.settings.loading.warmPerGroup)
         assertTrue(out.settings.loading.listParkedArenas)
-        assertEquals(5, out.settings.loading.idleUnloadMinutes)
+        assertEquals(300, out.settings.loading.idleUnloadSeconds)
     }
 
     @Test
@@ -101,5 +101,13 @@ class SettingsParserTest {
         assertEquals("\"/srv/my maps\"", (c("storage.path", "/srv/my maps") as Coerced.Ok).yaml)
         assertEquals("[\"bw\", \"bedwars\"]", (c("loading.jit-join.commands", "bw, bedwars") as Coerced.Ok).yaml)
         assertEquals("\"a\\\"b\"", ConfigKeys.quote("a\"b"))
+    }
+
+    @Test
+    fun `an old idle-unload-minutes value is converted to seconds`() {
+        val old = SettingsParser.parse(MapRawConfig(mapOf("loading" to mapOf("idle-unload-minutes" to 2)))).settings
+        assertEquals(120, old.loading.idleUnloadSeconds)
+        val both = SettingsParser.parse(MapRawConfig(mapOf("loading" to mapOf("idle-unload-minutes" to 2, "idle-unload-seconds" to 45)))).settings
+        assertEquals(45, both.loading.idleUnloadSeconds)
     }
 }

@@ -72,13 +72,18 @@ class ArenaPool(
     var refillPaused = false
         private set
 
+    /** While paused, only groups an arena was explicitly woken for (by a player or an admin) are topped up. */
+    private val demandGroups = HashSet<String>()
+
     fun pauseRefill() {
         refillPaused = true
+        demandGroups.clear()
     }
 
     fun resumeRefill() {
         if (refillPaused) {
             refillPaused = false
+            demandGroups.clear()
             requestRefill()
         }
     }
@@ -215,6 +220,7 @@ class ArenaPool(
         val loadingSettings = settings().loading
         val groups = cold.values.map { it.arena.group }.distinctBy { it.lowercase(Locale.ROOT) }
         for (g in groups) {
+            if (refillPaused && g.lowercase(Locale.ROOT) !in demandGroups) continue
             var need = WarmPolicy.deficit(loadingSettings.warmFor(g), openCount(g), inFlightCount(g))
             while (need > 0) {
                 val pick = pickCold(g) ?: break
@@ -237,6 +243,7 @@ class ArenaPool(
     fun activate(a: IArena) {
         val key = a.arenaName.lowercase(Locale.ROOT)
         cold.remove(key)
+        if (refillPaused) demandGroups += (a.group ?: "").lowercase(Locale.ROOT)
         hideListed(a) // BedWars' init() refuses an arena that is still registered, and its status must be reset
         forced += key
         lastActivated[key] = System.currentTimeMillis()
@@ -371,7 +378,6 @@ class ArenaPool(
     fun joinListed(player: Player, a: IArena) {
         // `/bw join random` offers several arenas in a row: only the first one is taken
         if (pending.any { it.player == player.uniqueId }) return
-        refillPaused = false
         // A party member is pulled along by the party leader's join, so only the leader waits.
         try {
             val party = bw.api.partyUtil
@@ -399,13 +405,13 @@ class ArenaPool(
             val key = a.arenaName.lowercase(Locale.ROOT)
             val busy = a.status != GameState.waiting || a.players.isNotEmpty() || a.spectators.isNotEmpty() ||
                 a in loading || pending.any { it.arenaKey == key }
-            val idleMin = if (busy) 0L else (now - (lastBusy[a] ?: now)) / 60_000L
+            val idleSec = if (busy) 0L else (now - (lastBusy[a] ?: now)) / 1000L
             val verdict = when {
                 !lazyActive() -> "never: loading.mode is not LAZY (or this is a BungeeCord server)"
-                s.idleUnloadMinutes <= 0 -> "never: loading.idle-unload-minutes is 0"
+                s.idleUnloadSeconds <= 0 -> "never: loading.idle-unload-seconds is 0"
                 busy -> "in use (${a.status}, ${a.players.size} player(s))"
                 openCount(a.group) <= s.warmFor(a.group) -> "kept loaded: inside warm-arenas-per-group (${s.warmFor(a.group)}) of group ${a.group}"
-                else -> "idle ${idleMin} min, sleeps after ${s.idleUnloadMinutes} min"
+                else -> "idle ${idleSec} s, sleeps after ${s.idleUnloadSeconds} s"
             }
             out += "${a.arenaName} [${a.group}]: $verdict"
         }
@@ -413,9 +419,9 @@ class ArenaPool(
     }
 
     private fun unloadIdle(now: Long) {
-        val minutes = settings().loading.idleUnloadMinutes
-        if (minutes <= 0 || !lazyActive() || bw.isShuttingDown()) return
-        val limit = minutes * 60_000L
+        val seconds = settings().loading.idleUnloadSeconds
+        if (seconds <= 0 || !lazyActive() || bw.isShuttingDown()) return
+        val limit = seconds * 1000L
         val alive: MutableSet<IArena> = Collections.newSetFromMap(IdentityHashMap())
         val idle = HashMap<String, MutableList<Pair<IArena, Long>>>()
         for (a in bw.arenaUtil.arenas.toList()) {
@@ -436,7 +442,7 @@ class ArenaPool(
             var open = openCount(g)
             for ((a, _) in list.sortedBy { it.second }) {
                 if (open <= settings().loading.warmFor(g)) break
-                log.info("Putting idle arena '${a.arenaName}' to sleep (unused for ${minutes}+ min).")
+                log.info("Putting idle arena '${a.arenaName}' to sleep (unused for ${seconds}+ s).")
                 lastBusy.remove(a)
                 open--
                 try {
@@ -461,7 +467,6 @@ class ArenaPool(
     fun requestJoin(player: Player, target: String, command: String): Boolean {
         val jit = settings().loading.jitJoin
         val key = target.lowercase(Locale.ROOT)
-        refillPaused = false
         val deadline = System.currentTimeMillis() + jit.timeoutSeconds * 1000L
 
         val parked = cold[key]
