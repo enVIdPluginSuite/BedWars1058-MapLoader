@@ -139,7 +139,7 @@ class WorldLoaderPlugin : JavaPlugin() {
         hooked = true
         services = built
 
-        server.pluginManager.registerEvents(ArenaListener(built.pool, built.takeover, settings), this)
+        server.pluginManager.registerEvents(ArenaListener(built.bw, built.pool, built.takeover, settings), this)
         val command = LoaderCommand(this)
         getCommand("bwloader")?.let {
             it.setExecutor(command)
@@ -192,6 +192,7 @@ class WorldLoaderPlugin : JavaPlugin() {
         rt.takeover.cleanupSeeds()
         // Anyone still running /bw setupArena: save their work into the library before the server stops.
         rt.adapter.finishSetupSessions()
+        rt.pool.hideAllListed()
         rt.io.shutdown(15)
         // Intentionally keep the services reference: BedWars1058 disables its arenas AFTER this plugin
         // and still calls the restore adapter, which then runs synchronously (see BwContext.isShuttingDown).
@@ -238,6 +239,7 @@ class WorldLoaderPlugin : JavaPlugin() {
             val n = rt.pool.activateAll()
             logger.info("Mode is EAGER: loading $n parked arena(s).")
         }
+        rt.pool.syncListing()
         rt.pool.requestRefill()
     }
 

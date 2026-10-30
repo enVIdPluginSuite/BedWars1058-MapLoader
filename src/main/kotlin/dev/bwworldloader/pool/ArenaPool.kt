@@ -64,6 +64,12 @@ class ArenaPool(
 
     private val pending = ArrayList<PendingJoin>()
 
+    /** Parked arenas currently shown in BedWars' arena list as "waiting" ("ghosts": they have no world yet). */
+    private val listed: MutableSet<IArena> = Collections.newSetFromMap(IdentityHashMap())
+
+    /** last time a loaded arena was in use, for the idle unload */
+    private val lastBusy = IdentityHashMap<IArena, Long>()
+
     /** Updated whenever the enable queue makes progress; used by the stall watchdog. */
     @Volatile
     var lastProgress: Long = System.currentTimeMillis()
@@ -110,7 +116,9 @@ class ArenaPool(
             return false
         }
         // The admin (or another plugin) re-enabled an arena that is parked: they want it now.
-        if (cold.remove(key) != null) {
+        val wasCold = cold.remove(key)
+        if (wasCold != null) {
+            hideListed(wasCold.arena)
             forced.remove(key)
             expectParking.remove(key)
             return false
@@ -126,6 +134,7 @@ class ArenaPool(
         val key = a.arenaName.lowercase(Locale.ROOT)
         loading.remove(a)
         cold[key] = Cold(a, seqByName.getOrPut(key) { ++seqCounter })
+        showListed(a)
         touch()
         debug("Parked arena '${a.arenaName}' (group ${a.group}); ${cold.size} parked")
         requestRefill()
@@ -209,6 +218,7 @@ class ArenaPool(
     fun activate(a: IArena) {
         val key = a.arenaName.lowercase(Locale.ROOT)
         cold.remove(key)
+        hideListed(a) // BedWars' init() refuses an arena that is still registered, and its status must be reset
         forced += key
         lastActivated[key] = System.currentTimeMillis()
         debug("Waking up arena '${a.arenaName}'")
@@ -235,7 +245,7 @@ class ArenaPool(
     }
 
     fun openCount(group: String): Int =
-        bw.arenaUtil.arenas.count { sameGroup(it.group, group) && isJoinable(it) }
+        bw.arenaUtil.arenas.count { it !in listed && sameGroup(it.group, group) && isJoinable(it) }
 
     private fun inFlightArenas(): Set<IArena> {
         val set: MutableSet<IArena> = Collections.newSetFromMap(IdentityHashMap())
@@ -259,7 +269,7 @@ class ArenaPool(
         fun note(g: String) {
             groups.putIfAbsent(g.lowercase(Locale.ROOT), g)
         }
-        bw.arenaUtil.arenas.forEach { note(it.group) }
+        bw.arenaUtil.arenas.forEach { if (it !in listed) note(it.group) }
         cold.values.forEach { note(it.arena.group) }
         loading.forEach { note(it.group) }
         val s = settings().loading
@@ -269,10 +279,130 @@ class ArenaPool(
                 target = s.warmFor(g),
                 open = openCount(g),
                 loading = inFlightCount(g),
-                active = bw.arenaUtil.arenas.count { sameGroup(it.group, g) },
+                active = bw.arenaUtil.arenas.count { it !in listed && sameGroup(it.group, g) },
                 cold = cold.values.count { sameGroup(it.arena.group, g) },
             )
         }.sortedBy { it.group.lowercase(Locale.ROOT) }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Listing parked arenas
+    //
+    // A parked arena is a real BedWars arena object that was never initialised (it has no world). Adding it to
+    // BedWars' arena list with status "waiting" makes the selector GUI, `/bw join random|<group>` and the arena
+    // list show it. Joining it fires PlayerJoinArenaEvent before BedWars touches the (missing) world; we cancel
+    // that, load the world and let the player join when it is ready ([joinListed]).
+    // ---------------------------------------------------------------------------------------------
+
+    fun listingActive(): Boolean = lazyActive() && settings().loading.listParkedArenas && bw.liveArenas
+
+    fun isListed(a: IArena): Boolean = a in listed
+
+    fun listedByName(name: String): IArena? = cold[name.lowercase(Locale.ROOT)]?.arena?.takeIf { it in listed }
+
+    fun listedCount(): Int = listed.size
+
+    private fun showListed(a: IArena) {
+        if (!listingActive() || a in listed) return
+        try {
+            a.status = GameState.waiting
+            bw.arenas.add(a)
+            bw.arenaUtil.setArenaByName(a)
+            listed += a
+        } catch (t: Throwable) {
+            log.warning("Could not list parked arena '${a.arenaName}': ${t.message}")
+        }
+    }
+
+    private fun hideListed(a: IArena) {
+        if (!listed.remove(a)) return
+        bw.arenas.remove(a)
+        bw.arenaUtil.removeArenaByName(a.arenaName)
+        try {
+            a.status = GameState.restarting // the state of a fresh arena; BedWars' init() switches it to waiting itself
+        } catch (t: Throwable) {
+            // nothing sensible to do
+        }
+    }
+
+    /** Re-applies `list-parked-arenas` (after a reload / config change). */
+    fun syncListing() {
+        if (listingActive()) cold.values.forEach { showListed(it.arena) } else hideAllListed()
+    }
+
+    /** Removes every parked arena from BedWars' lists; they stay parked. Must run before BedWars disables its arenas. */
+    fun hideAllListed() {
+        listed.toList().forEach { hideListed(it) }
+    }
+
+    /** `/bw disableArena <name>` on a parked arena: forget it, like BedWars does for a loaded one. */
+    fun disableListed(name: String): Boolean {
+        val key = name.lowercase(Locale.ROOT)
+        val c = cold[key] ?: return false
+        hideListed(c.arena)
+        cold.remove(key)
+        requestRefill()
+        return true
+    }
+
+    /**
+     * A player tried to join the listed arena [a] (selector GUI, sign, `/bw join random` ...). The caller has
+     * cancelled the join; wake the arena and join the player when it is ready.
+     */
+    fun joinListed(player: Player, a: IArena) {
+        // `/bw join random` offers several arenas in a row: only the first one is taken
+        if (pending.any { it.player == player.uniqueId }) return
+        // A party member is pulled along by the party leader's join, so only the leader waits.
+        try {
+            val party = bw.api.partyUtil
+            if (party.hasParty(player) && !party.isOwner(player)) return
+        } catch (t: Throwable) {
+            // no party support: treat as a solo player
+        }
+        val key = a.arenaName.lowercase(Locale.ROOT)
+        val label = settings().loading.jitJoin.commands.firstOrNull() ?: "bw"
+        pending += PendingJoin(player.uniqueId, key, null, System.currentTimeMillis() + settings().loading.jitJoin.timeoutSeconds * 1000L, "$label join ${a.arenaName}")
+        player.sendMessage(message(settings().messages.jitPreparing, a.arenaName))
+        // next tick: we are inside BedWars' addPlayer right now
+        bw.sync { if (cold[key]?.arena === a) activate(a) }
+    }
+
+    // --- idle unload ---
+
+    private fun unloadIdle(now: Long) {
+        val minutes = settings().loading.idleUnloadMinutes
+        if (minutes <= 0 || !lazyActive() || bw.isShuttingDown()) return
+        val limit = minutes * 60_000L
+        val alive: MutableSet<IArena> = Collections.newSetFromMap(IdentityHashMap())
+        val idle = HashMap<String, MutableList<Pair<IArena, Long>>>()
+        for (a in bw.arenaUtil.arenas.toList()) {
+            if (a in listed) continue
+            alive += a
+            val key = a.arenaName.lowercase(Locale.ROOT)
+            val busy = a.status != GameState.waiting || a.players.isNotEmpty() || a.spectators.isNotEmpty() ||
+                a in loading || pending.any { it.arenaKey == key }
+            if (busy) {
+                lastBusy[a] = now
+                continue
+            }
+            val since = lastBusy.getOrPut(a) { now }
+            if (now - since >= limit) idle.getOrPut(a.group.lowercase(Locale.ROOT)) { ArrayList() } += a to since
+        }
+        lastBusy.keys.retainAll(alive)
+        for ((g, list) in idle) {
+            var open = openCount(g)
+            for ((a, _) in list.sortedBy { it.second }) {
+                if (open <= settings().loading.warmFor(g)) break
+                debug("Unloading idle arena '${a.arenaName}'")
+                lastBusy.remove(a)
+                open--
+                try {
+                    a.restart() // BedWars -> our adapter: world is unloaded and deleted, the arena is parked (and listed) again
+                } catch (t: Throwable) {
+                    log.warning("Could not unload idle arena '${a.arenaName}': ${t.message}")
+                }
+            }
+        }
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -353,7 +483,7 @@ class ArenaPool(
     private fun coldFor(target: String): List<Cold> = cold.values.filter { groupMatches(it.arena.group, target) }
 
     private fun openCountFor(target: String): Int =
-        bw.arenaUtil.arenas.count { groupMatches(it.group, target) && isJoinable(it) }
+        bw.arenaUtil.arenas.count { it !in listed && groupMatches(it.group, target) && isJoinable(it) }
 
     private fun inFlightCountFor(target: String): Int = inFlightArenas().count { groupMatches(it.group, target) }
 
@@ -390,6 +520,7 @@ class ArenaPool(
             touch()
             onStall(head)
         }
+        unloadIdle(now)
         refill()
     }
 

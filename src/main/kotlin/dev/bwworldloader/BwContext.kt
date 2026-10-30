@@ -26,6 +26,12 @@ class BwContext(val plugin: Plugin, val api: BedWars, val bwPlugin: Plugin) {
     /** True when [queue] hands out the real list, so entries can be detached without side effects. */
     val liveQueue: Boolean = api.arenaUtil.enableQueue === api.arenaUtil.enableQueue
 
+    /** BedWars' list of active arenas (what its GUIs and join commands read). */
+    val arenas: LinkedList<IArena> get() = api.arenaUtil.arenas
+
+    /** True when [arenas] hands out the real list, so parked arenas can be listed in it. */
+    val liveArenas: Boolean = api.arenaUtil.arenas === api.arenaUtil.arenas
+
     val serverType: ServerType get() = api.serverType
 
     val autoscale: Boolean get() = api.isAutoScale

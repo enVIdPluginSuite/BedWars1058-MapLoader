@@ -42,8 +42,19 @@ loading:
   # (On BungeeCord servers BedWars1058 already creates arenas on demand, so LAZY acts like EAGER there.)
   mode: LAZY
 
-  # How many JOINABLE arenas to keep ready for each arena group.
-  warm-arenas-per-group: 2
+  # How many JOINABLE arenas to keep loaded and ready for each arena group.
+  # 0 = nothing is kept loaded: every arena is listed (see list-parked-arenas) and loads when a player joins it.
+  warm-arenas-per-group: 0
+
+  # Show every parked (not loaded) arena as a normal "waiting" arena in BedWars1058's arena selector GUI,
+  # /bw join random and group joins. When a player picks one, they are told it is being prepared, the world
+  # is loaded, and they join automatically as soon as it is ready. (Signs of a parked arena start working once
+  # it has been loaded once; other plugins that read the arena list can see parked arenas without a world.)
+  list-parked-arenas: true
+
+  # An arena nobody is using (waiting, no players) is unloaded again after this many minutes and becomes a
+  # parked, listed arena again. Arenas inside the warm-arenas-per-group count are kept. 0 = never unload.
+  idle-unload-minutes: 5
 
   # Different numbers for specific groups, e.g.   Solo: 4
   # (or in-game: /bwloader config set loading.group-overrides.Solo 4)

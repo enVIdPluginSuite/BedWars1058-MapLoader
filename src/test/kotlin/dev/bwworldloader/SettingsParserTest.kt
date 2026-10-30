@@ -21,7 +21,9 @@ class SettingsParserTest {
         assertTrue(out.ok, out.problems.toString())
         assertEquals(LoadMode.LAZY, out.settings.loading.mode)
         assertEquals("bedwars_worlds", out.settings.storage.path)
-        assertEquals(2, out.settings.loading.warmPerGroup)
+        assertEquals(0, out.settings.loading.warmPerGroup)
+        assertTrue(out.settings.loading.listParkedArenas)
+        assertEquals(5, out.settings.loading.idleUnloadMinutes)
     }
 
     @Test

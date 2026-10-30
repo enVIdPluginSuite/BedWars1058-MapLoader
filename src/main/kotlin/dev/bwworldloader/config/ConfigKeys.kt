@@ -50,6 +50,8 @@ object ConfigKeys {
         KeySpec("loading.stagger-ticks", ValueType.IntRange(0, 1200), "Minimum ticks between two world loads"),
         KeySpec("loading.register-per-tick", ValueType.IntRange(1, 1000), "Arenas re-registered per tick at startup"),
         KeySpec("loading.io-threads", ValueType.IntRange(1, 16), "Background threads used for copying/zipping maps"),
+        KeySpec("loading.list-parked-arenas", ValueType.Bool, "Show parked arenas as waiting in BedWars' arena list/GUIs; the world loads when a player joins"),
+        KeySpec("loading.idle-unload-minutes", ValueType.IntRange(0, 1440), "Unload an arena nobody is using after this many minutes (0 = never)"),
         KeySpec("loading.stall-timeout-seconds", ValueType.IntRange(0, 3600), "Skip an arena that has not loaded after this long (0 = off)"),
         KeySpec("loading.jit-join.enabled", ValueType.Bool, "Wake a parked arena when a player runs /bw join <arena>"),
         KeySpec("loading.jit-join.commands", ValueType.TextList, "Command labels that are watched for the join command"),

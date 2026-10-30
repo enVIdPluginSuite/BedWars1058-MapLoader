@@ -76,7 +76,7 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
         s.sendMessage(line("Library", "${rt.store.storageDir} ${ChatColor.GRAY}(${rt.store.templates().size} maps: " +
             "${kinds[dev.bwworldloader.storage.WorldStore.Kind.FOLDER] ?: 0} folders, ${kinds[dev.bwworldloader.storage.WorldStore.Kind.ZIP] ?: 0} zips)"))
         s.sendMessage(line("Arenas", "${rt.bw.arenaUtil.arenas.size} active, ${rt.pool.loadingCount()} loading, " +
-            "${rt.pool.coldCount()} parked, ${rt.bw.queue.size} in BedWars' enable queue"))
+            "${rt.pool.coldCount()} parked (${rt.pool.listedCount()} listed in BedWars' arena list), ${rt.bw.queue.size} in BedWars' enable queue"))
         s.sendMessage(line("Runtime copies", "${rt.runtime.ownedCount()} in the server root"))
         if (rt.pool.pendingCount() > 0) s.sendMessage(line("Waiting players", rt.pool.pendingCount().toString()))
         for (g in rt.pool.status()) {

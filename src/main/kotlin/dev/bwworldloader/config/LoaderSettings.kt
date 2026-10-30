@@ -38,13 +38,17 @@ data class JitJoinSettings(
 
 data class LoadingSettings(
     val mode: LoadMode = LoadMode.LAZY,
-    val warmPerGroup: Int = 2,
+    val warmPerGroup: Int = 0,
     val groupOverrides: Map<String, Int> = emptyMap(),
     val selection: Selection = Selection.LEAST_RECENT,
     val staggerTicks: Int = 10,
     val registerPerTick: Int = 10,
     val ioThreads: Int = 2,
     val stallTimeoutSeconds: Int = 60,
+    /** Keep parked arenas visible (waiting) in BedWars' arena list, GUIs and /bw join random. */
+    val listParkedArenas: Boolean = true,
+    /** Arenas without players are unloaded again after this many minutes (0 = never). */
+    val idleUnloadMinutes: Int = 5,
     val jitJoin: JitJoinSettings = JitJoinSettings(),
 ) {
     /** Number of joinable arenas to keep ready for [group]. */
@@ -128,6 +132,8 @@ object SettingsParser {
             registerPerTick = p.int("loading.register-per-tick", d.loading.registerPerTick, 1, 1000),
             ioThreads = p.int("loading.io-threads", d.loading.ioThreads, 1, 16),
             stallTimeoutSeconds = p.int("loading.stall-timeout-seconds", d.loading.stallTimeoutSeconds, 0, 3600),
+            listParkedArenas = p.bool("loading.list-parked-arenas", d.loading.listParkedArenas),
+            idleUnloadMinutes = p.int("loading.idle-unload-minutes", d.loading.idleUnloadMinutes, 0, 1440),
             jitJoin = jit,
         )
 
