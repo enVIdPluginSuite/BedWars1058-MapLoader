@@ -1,0 +1,20 @@
+name: BedWarsWorldLoader
+main: dev.bwworldloader.WorldLoaderPlugin
+version: ${version}
+# Ignored by 1.8 - 1.12 servers; on 1.13+ it keeps Bukkit from applying legacy material support.
+api-version: '1.13'
+description: Just-in-time arena world loading and a configurable map library for BedWars1058.
+author: BedWarsWorldLoader
+depend: [BedWars1058]
+
+commands:
+  bwloader:
+    description: Manage BedWars map loading
+    usage: /<command> help
+    aliases: [bwl, bedwarsloader]
+    permission: bwworldloader.admin
+
+permissions:
+  bwworldloader.admin:
+    description: Use /bwloader (status, reload, config, migrate)
+    default: op

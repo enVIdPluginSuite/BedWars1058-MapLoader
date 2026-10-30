@@ -1,0 +1,94 @@
+# ===========================================================================================
+#  BedWarsWorldLoader  -  just-in-time map loading for BedWars1058
+# ===========================================================================================
+#  Everything below can be changed in-game with   /bwloader config set <key> <value>
+#  and applied without a restart with             /bwloader reload
+#  (/bwloader config list  shows every key)
+# ===========================================================================================
+
+storage:
+  # The map library: ONE folder that holds every BedWars map, so the server root stays clean.
+  # Relative paths start at the server root; absolute paths (and ../shared_maps) work too.
+  # A map is either a world folder   <path>/<arena>/region/...   or a zip   <path>/<arena>.zip
+  path: "bedwars_worlds"
+
+  # Create the folder if it does not exist yet.
+  create-if-missing: true
+
+  # How a map is stored after /bw setupArena finishes: FOLDER or ZIP.
+  # ZIP keeps the library small - a map is only unpacked while its arena is actually loaded.
+  format-on-save: FOLDER
+
+  # Maps that still sit in the server root are moved into the library the first time their arena
+  # needs them (or all at once with /bwloader migrate). Only worlds that belong to a BedWars arena
+  # are ever touched, and never a world that is currently loaded.
+  import-from-root: true
+
+  # The folder listing is cached for this many seconds (0 = look at the disk every time).
+  # A map you drop into the folder is also noticed on the next lookup, so this rarely matters.
+  index-refresh-seconds: 30
+
+loading:
+  # LAZY  = just-in-time. Arenas are "parked" and only a few joinable arenas per group are kept
+  #         loaded (see warm-arenas-per-group). More are woken up as the loaded ones fill up or
+  #         start playing, or when a player runs /bw join <arena>.
+  # EAGER = every arena is loaded at startup like stock BedWars1058, but from the library and
+  #         spaced out (stagger-ticks) so the server does not freeze.
+  # (On BungeeCord servers BedWars1058 already creates arenas on demand, so LAZY acts like EAGER there.)
+  mode: LAZY
+
+  # How many JOINABLE arenas to keep ready for each arena group.
+  warm-arenas-per-group: 2
+
+  # Different numbers for specific groups, e.g.   Solo: 4
+  # (or in-game: /bwloader config set loading.group-overrides.Solo 4)
+  group-overrides: {}
+
+  # Which parked arena is woken up next:
+  #   LEAST_RECENT  the map that has not been played for the longest time (best variety)
+  #   RANDOM        any parked map
+  #   ROUND_ROBIN   walk through the maps in a fixed order
+  selection: LEAST_RECENT
+
+  # Minimum ticks (20 = 1 second) between two world loads. Higher = smoother, slower to fill up.
+  stagger-ticks: 10
+
+  # At startup, arenas whose maps are in the library are registered with BedWars1058 in batches of
+  # this many per tick, so registering hundreds of arenas does not block the server.
+  register-per-tick: 10
+
+  # Background threads used to copy / unzip / zip maps. Raise on fast disks, lower on slow ones.
+  io-threads: 2
+
+  # If the arena at the front of BedWars' loading queue has not finished after this many seconds
+  # it is skipped so the rest keeps loading. 0 disables the watchdog.
+  stall-timeout-seconds: 60
+
+  jit-join:
+    # When a player runs /bw join <arena> for an arena that is parked, wake it up and join the
+    # player automatically as soon as it is ready. Also works for a group with nothing joinable.
+    enabled: true
+    # Command labels that are watched (your BedWars1058 main command and its aliases).
+    commands: ["bw", "bedwars"]
+    # How long a waiting player is kept in the queue.
+    timeout-seconds: 30
+
+world:
+  # Keep the arena's spawn chunks loaded (BedWars1058's default). Turn off to save memory.
+  keep-spawn-in-memory: true
+
+  # Ignore level.dat from stored maps, like BedWars1058's own adapter does.
+  delete-level-dat: true
+
+  # Chunks that were never built come out as void instead of normal terrain.
+  void-generator: true
+
+# Player facing messages. Use & colour codes. {arena} is replaced with the arena (or group) name.
+messages:
+  jit-preparing: "&eThe arena &6{arena}&e is being prepared, you will join automatically..."
+  jit-joining: "&aArena ready, joining!"
+  jit-failed: "&cCould not prepare that arena. Please try again later."
+  jit-timeout: "&cThe arena took too long to prepare. Please try again."
+
+# Verbose logging of what the pool is doing.
+debug: false
