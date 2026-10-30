@@ -3,13 +3,13 @@
 Fixes slow startups and freezes on BedWars1058 servers with hundreds of arena worlds in the server root.
 
 * **Map library** – all BedWars maps live in ONE folder (default `bedwars_worlds/`, set `storage.path`). A map is a world folder or a `.zip`.
-* **Just-in-time loading** (`loading.mode: LAZY`) – arenas that are not needed are *parked* (no world loaded) but stay **listed**: BedWars1058's arena selector GUI, `/bw join random` and group joins show them as "waiting". When a player picks one they get a "preparing" message, the world is copied from the library and loaded, and they join automatically. Arenas nobody uses are unloaded again after `loading.idle-unload-seconds` (default 300) and become parked/listed again. `warm-arenas-per-group` (default 0) keeps some arenas permanently loaded.
+* **Just-in-time loading** (`loading.mode: LAZY`) – arenas that are not needed are *parked* (no world loaded) but stay **listed**: BedWars1058's arena selector GUI, `/bw join random` and group joins show them as "waiting". When a player picks one they get a "preparing" message, the world is copied from the library and loaded, and they join automatically. Arenas nobody uses are unloaded again after `loading.idle-unload-seconds` (default 300) and become parked/listed again. `warm-arenas-per-group` (default 0) keeps some arenas permanently loaded, but is ignored while `list-parked-arenas` is on (every arena is joinable anyway). Every world load is logged with its reason (`Loading arena 'X' (...)`).
 * **EAGER mode** – loads everything like stock BedWars1058, but from the library and staggered (`stagger-ticks`) so the main thread never freezes.
 * Runtime copies are made in the server root only while an arena runs (marked with `.maploader-runtime`) and deleted afterwards. Only copies the plugin created are ever deleted.
 * Existing worlds in the root are moved into the library on first use (`storage.import-from-root`) or all at once with `/bwloader migrate confirm`.
 
 ## Install
-1. Put `BedWars1058-MapLoader-3.4.0.jar` in `plugins/` next to BedWars1058 (required).
+1. Put `BedWars1058-MapLoader-3.5.0.jar` in `plugins/` next to BedWars1058 (required).
 2. Start once, edit `plugins/BedWars1058-MapLoader/config.yml` (or use commands), run `/bwloader migrate`, then `/bwloader migrate confirm`.
 
 ## Commands (permission `bw1058maploader.admin`, aliases `/bwl`)

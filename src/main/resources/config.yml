@@ -44,6 +44,8 @@ loading:
 
   # How many JOINABLE arenas to keep loaded and ready for each arena group.
   # 0 = nothing is kept loaded: every arena is listed (see list-parked-arenas) and loads when a player joins it.
+  # NOTE: while list-parked-arenas is true this value is ignored (every arena is joinable anyway, so keeping some
+  # loaded in advance would only waste memory and keep them from unloading). Set list-parked-arenas to false to use it.
   warm-arenas-per-group: 0
 
   # Show every parked (not loaded) arena as a normal "waiting" arena in BedWars1058's arena selector GUI,

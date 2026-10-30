@@ -176,7 +176,9 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
         val cfg = rt.settingsService.settings.loading
         s.sendMessage(title("Loaded arenas"))
         s.sendMessage(line("Idle unload", "${if (cfg.idleUnloadSeconds <= 0) "off" else "${cfg.idleUnloadSeconds} s"}${ChatColor.GRAY}, mode ${cfg.mode}, " +
-            "warm per group ${cfg.warmPerGroup}${if (cfg.groupOverrides.isNotEmpty()) " (overrides: ${cfg.groupOverrides})" else ""}"))
+            "warm per group ${cfg.warmPerGroup}${if (cfg.groupOverrides.isNotEmpty()) " (overrides: ${cfg.groupOverrides})" else ""}" +
+            if (rt.pool.listingActive() && (cfg.warmPerGroup > 0 || cfg.groupOverrides.isNotEmpty())) " ${ChatColor.YELLOW}(ignored while list-parked-arenas is on)" else ""))
+        s.sendMessage(line("Server type", "${rt.bw.serverType}${ChatColor.GRAY}, parked arenas listed: ${rt.pool.listingActive()}"))
         if (rt.pool.refillPaused) s.sendMessage(line("Warm pool", "${ChatColor.YELLOW}paused by /bwloader sleep: only the group of an arena someone wakes is topped up, until you reload"))
         val rows = rt.pool.sleepReport()
         if (rows.isEmpty()) s.sendMessage(ChatColor.GRAY.toString() + "No arena is loaded right now.")

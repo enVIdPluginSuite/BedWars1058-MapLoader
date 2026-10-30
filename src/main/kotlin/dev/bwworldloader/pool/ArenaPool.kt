@@ -221,10 +221,10 @@ class ArenaPool(
         val groups = cold.values.map { it.arena.group }.distinctBy { it.lowercase(Locale.ROOT) }
         for (g in groups) {
             if (refillPaused && g.lowercase(Locale.ROOT) !in demandGroups) continue
-            var need = WarmPolicy.deficit(loadingSettings.warmFor(g), openCount(g), inFlightCount(g))
+            var need = WarmPolicy.deficit(effectiveWarm(g), openCount(g), inFlightCount(g))
             while (need > 0) {
                 val pick = pickCold(g) ?: break
-                activate(pick)
+                activate(pick, "warm pool: group $g has ${openCount(g)} open of ${effectiveWarm(g)} wanted")
                 need--
             }
         }
@@ -240,7 +240,8 @@ class ArenaPool(
     }
 
     /** Moves a parked arena back into BedWars' enable queue; our adapter will then really load it. */
-    fun activate(a: IArena) {
+    fun activate(a: IArena, reason: String = "requested") {
+        log.info("Loading arena '${a.arenaName}' ($reason)")
         val key = a.arenaName.lowercase(Locale.ROOT)
         cold.remove(key)
         if (refillPaused) demandGroups += (a.group ?: "").lowercase(Locale.ROOT)
@@ -254,14 +255,14 @@ class ArenaPool(
     /** Activates a parked arena by name (admin command). Returns false if it is not parked. */
     fun activateByName(name: String): Boolean {
         val c = cold[name.lowercase(Locale.ROOT)] ?: return false
-        activate(c.arena)
+        activate(c.arena, "admin command")
         return true
     }
 
     /** Used when switching from LAZY to EAGER: bring every parked arena online. */
     fun activateAll(): Int {
         val all = cold.values.map { it.arena }
-        all.forEach { activate(it) }
+        all.forEach { activate(it, "load all") }
         return all.size
     }
 
@@ -302,7 +303,7 @@ class ArenaPool(
         return groups.values.map { g ->
             GroupStatus(
                 group = g,
-                target = s.warmFor(g),
+                target = effectiveWarm(g),
                 open = openCount(g),
                 loading = inFlightCount(g),
                 active = bw.arenaUtil.arenas.count { it !in listed && sameGroup(it.group, g) },
@@ -319,6 +320,12 @@ class ArenaPool(
     // list show it. Joining it fires PlayerJoinArenaEvent before BedWars touches the (missing) world; we cancel
     // that, load the world and let the player join when it is ready ([joinListed]).
     // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Warm arenas are only used while parked arenas are NOT listed: when they are listed every arena is joinable
+     * anyway (it loads on demand), so keeping some loaded in advance would only waste memory and block unloading.
+     */
+    fun effectiveWarm(group: String): Int = if (listingActive()) 0 else settings().loading.warmFor(group)
 
     fun listingActive(): Boolean = lazyActive() && settings().loading.listParkedArenas && bw.liveArenas
 
@@ -390,7 +397,7 @@ class ArenaPool(
         pending += PendingJoin(player.uniqueId, key, null, System.currentTimeMillis() + settings().loading.jitJoin.timeoutSeconds * 1000L, "$label join ${a.arenaName}")
         player.sendMessage(message(settings().messages.jitPreparing, a.arenaName))
         // next tick: we are inside BedWars' addPlayer right now
-        bw.sync { if (cold[key]?.arena === a) activate(a) }
+        bw.sync { if (cold[key]?.arena === a) activate(a, "${player.name} joined it") }
     }
 
     // --- idle unload ---
@@ -410,7 +417,7 @@ class ArenaPool(
                 !lazyActive() -> "never: loading.mode is not LAZY (or this is a BungeeCord server)"
                 s.idleUnloadSeconds <= 0 -> "never: loading.idle-unload-seconds is 0"
                 busy -> "in use (${a.status}, ${a.players.size} player(s))"
-                openCount(a.group) <= s.warmFor(a.group) -> "kept loaded: inside warm-arenas-per-group (${s.warmFor(a.group)}) of group ${a.group}"
+                openCount(a.group) <= effectiveWarm(a.group) -> "kept loaded: inside warm-arenas-per-group (${effectiveWarm(a.group)}) of group ${a.group}"
                 else -> "idle ${idleSec} s, sleeps after ${s.idleUnloadSeconds} s"
             }
             out += "${a.arenaName} [${a.group}]: $verdict"
@@ -441,7 +448,7 @@ class ArenaPool(
         for ((g, list) in idle) {
             var open = openCount(g)
             for ((a, _) in list.sortedBy { it.second }) {
-                if (open <= settings().loading.warmFor(g)) break
+                if (open <= effectiveWarm(g)) break
                 log.info("Putting idle arena '${a.arenaName}' to sleep (unused for ${seconds}+ s).")
                 lastBusy.remove(a)
                 open--
@@ -474,7 +481,7 @@ class ArenaPool(
             pending.removeAll { it.player == player.uniqueId }
             pending += PendingJoin(player.uniqueId, key, null, deadline, command)
             player.sendMessage(message(settings().messages.jitPreparing, parked.arena.arenaName))
-            activate(parked.arena)
+            activate(parked.arena, "${player.name} ran /bw join ${parked.arena.arenaName}")
             return true
         }
 
@@ -483,7 +490,7 @@ class ArenaPool(
             pending.removeAll { it.player == player.uniqueId }
             pending += PendingJoin(player.uniqueId, null, key, deadline, command)
             player.sendMessage(message(settings().messages.jitPreparing, target))
-            if (inFlightCountFor(target) == 0) pickColdFor(target)?.let { activate(it) }
+            if (inFlightCountFor(target) == 0) pickColdFor(target)?.let { activate(it, "${player.name} ran /bw join $target") }
             return true
         }
         return false
@@ -518,7 +525,7 @@ class ArenaPool(
         // people still waiting for a group: wake one more arena for them
         val waitingGroups = pending.mapNotNull { it.groupKey }.distinct()
         for (g in waitingGroups) {
-            if (inFlightCountFor(g) == 0 && openCountFor(g) == 0) pickColdFor(g)?.let { activate(it) }
+            if (inFlightCountFor(g) == 0 && openCountFor(g) == 0) pickColdFor(g)?.let { activate(it, "players are waiting for group $g") }
         }
     }
 
