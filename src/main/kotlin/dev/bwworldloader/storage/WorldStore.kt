@@ -335,6 +335,40 @@ class WorldStore(
         return result
     }
 
+    /**
+     * Puts the stored map [name] back into the server root as an ordinary world folder `<serverRoot>/<name>`
+     * (exactly what stock BedWars1058 expects). Refuses to touch anything that already exists there.
+     * With [move] the map is then removed from the library (archived as a backup when backups are enabled).
+     */
+    fun restoreToRoot(name: String, move: Boolean): File {
+        val safe = safeName(name) ?: throw IllegalArgumentException("Illegal map name '$name'")
+        return NameLocks.with(NameLocks.tpl(safe)) {
+            NameLocks.with(NameLocks.rt(safe)) {
+                val t = find(safe) ?: throw IOException("Map '$safe' is not in the library")
+                val target = File(serverRoot, safe)
+                if (target.exists()) throw IOException("'$safe' already exists in the server root")
+                val tmp = File(serverRoot, ".$safe.restoring")
+                FileOps.deleteRecursively(tmp.toPath())
+                try {
+                    when (t.kind) {
+                        Kind.FOLDER -> FileOps.copyDirectory(t.path, tmp.toPath(), FileOps.storeSkip)
+                        Kind.ZIP -> FileOps.unzip(t.path, tmp.toPath(), FileOps.storeSkip)
+                    }
+                    check(FileOps.isWorldFolder(tmp)) { "Restored copy of '$safe' is incomplete" }
+                    FileOps.moveDirectory(tmp.toPath(), target.toPath())
+                } catch (ex: Exception) {
+                    FileOps.deleteRecursively(tmp.toPath())
+                    throw ex
+                }
+                if (move) {
+                    archive(t, settings.backupsToKeep)
+                    rescan()
+                }
+                target
+            }
+        }
+    }
+
     /** Deletes the stored map (and nothing else). Returns true if something was removed. */
     fun delete(name: String): Boolean = NameLocks.with(NameLocks.tpl(name)) {
         val t = find(name)

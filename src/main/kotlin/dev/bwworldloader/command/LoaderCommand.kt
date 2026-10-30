@@ -14,7 +14,7 @@ import java.util.Locale
 /** `/bwloader` - status, reload, in-game config editing and map migration. */
 class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, TabCompleter {
 
-    private val subcommands = listOf("help", "status", "reload", "config", "scan", "activate", "migrate")
+    private val subcommands = listOf("help", "status", "reload", "config", "scan", "activate", "migrate", "restore")
 
     override fun onCommand(sender: CommandSender, command: Command, label: String, args: Array<out String>): Boolean {
         if (!sender.hasPermission("bw1058maploader.admin")) {
@@ -37,6 +37,7 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
             }
             "activate" -> activate(sender, args.getOrNull(1))
             "migrate" -> migrate(sender, args.getOrNull(1)?.equals("confirm", ignoreCase = true) == true)
+            "restore" -> restore(sender, label, args.drop(1))
             else -> {
                 sender.sendMessage(err("Unknown subcommand '${args[0]}'."))
                 help(sender, label)
@@ -58,6 +59,7 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
             "scan" to "Re-read the map library folder",
             "activate <arena>" to "Load a parked arena right now",
             "migrate [confirm]" to "Move arena maps from the server root into the library",
+            "restore <arena|all> [move] [confirm]" to "Put maps back into the server root (stock BedWars1058 layout)",
         )) {
             s.sendMessage("${ChatColor.GOLD} ▪ ${ChatColor.GRAY}/$label ${ChatColor.YELLOW}$cmd ${ChatColor.GRAY}- $desc")
         }
@@ -129,7 +131,11 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
 
     private fun activate(s: CommandSender, arena: String?) {
         val rt = plugin.services ?: return
-        if (arena == null) return s.sendMessage(err("Usage: /bwloader activate <arena>"))
+        if (arena == null) return s.sendMessage(err("Usage: /bwloader activate <arena|all>"))
+        if (arena.equals("all", ignoreCase = true)) {
+            val n = rt.pool.activateAll()
+            return s.sendMessage(if (n > 0) ok("Loading $n parked arena(s) (staggered)...") else err("No parked arenas."))
+        }
         if (rt.pool.activateByName(arena)) s.sendMessage(ok("Waking up arena '$arena'..."))
         else s.sendMessage(err("'$arena' is not parked. Parked arenas: ${rt.pool.coldNames().take(15).joinToString(", ").ifEmpty { "none" }}"))
     }
@@ -157,6 +163,26 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
         plugin.runMigration(plan, s)
     }
 
+    private fun restore(s: CommandSender, label: String, args: List<String>) {
+        val target = args.firstOrNull { !it.equals("move", true) && !it.equals("confirm", true) }
+            ?: return s.sendMessage(err("Usage: /$label restore <arena|all> [move] [confirm]"))
+        val move = args.any { it.equals("move", true) }
+        val confirm = args.any { it.equals("confirm", true) }
+        val plan = plugin.planRestore(target)
+        s.sendMessage(title("Restore maps into the server root"))
+        s.sendMessage(line("To restore", "${plan.restorable.size} map(s)" + if (move) " (moved out of the library)" else " (copied, library keeps them)"))
+        if (plan.conflicts.isNotEmpty()) s.sendMessage(line("Skipped", "${plan.conflicts.size} already exist in the server root: " + plan.conflicts.take(8).joinToString(", ")))
+        if (plan.inUse.isNotEmpty()) s.sendMessage(line("In use", "${plan.inUse.size} currently loaded: " + plan.inUse.take(8).joinToString(", ")))
+        if (plan.notFound.isNotEmpty()) s.sendMessage(line("Not found", plan.notFound.joinToString(", ")))
+        if (plan.restorable.isEmpty()) return s.sendMessage(err("Nothing to restore."))
+        s.sendMessage(ChatColor.GRAY.toString() + "   " + plan.restorable.take(12).joinToString(", ") + if (plan.restorable.size > 12) ", ..." else "")
+        if (!confirm) {
+            s.sendMessage(ChatColor.YELLOW.toString() + "Run /$label restore $target${if (move) " move" else ""} confirm to do it. Existing folders are never overwritten.")
+            return
+        }
+        plugin.runRestore(plan, move, s)
+    }
+
     // ---------------------------------------------------------------------------------------------
 
     override fun onTabComplete(sender: CommandSender, command: Command, alias: String, args: Array<out String>): List<String> {
@@ -171,7 +197,9 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
                 args.size == 4 && args[1].equals("set", true) -> valueSuggestions(args[2])
                 else -> emptyList()
             }
-            args[0].equals("activate", true) && args.size == 2 -> rt.pool.coldNames()
+            args[0].equals("activate", true) && args.size == 2 -> rt.pool.coldNames() + "all"
+            args[0].equals("restore", true) && args.size == 2 -> rt.store.names() + "all"
+            args[0].equals("restore", true) -> listOf("move", "confirm")
             args[0].equals("migrate", true) && args.size == 2 -> listOf("confirm")
             else -> emptyList()
         }

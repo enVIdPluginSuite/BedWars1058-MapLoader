@@ -288,4 +288,56 @@ class WorldLoaderPlugin : JavaPlugin() {
             }
         }
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Restore: library -> server root (the reverse of migrate)
+    // ---------------------------------------------------------------------------------------------
+
+    data class RestorePlan(val restorable: List<String>, val conflicts: List<String>, val inUse: List<String>, val notFound: List<String>)
+
+    /** [target] is a map name or "all". */
+    fun planRestore(target: String): RestorePlan {
+        val rt = services ?: return RestorePlan(emptyList(), emptyList(), emptyList(), emptyList())
+        val protectedNames = rt.runtime.protectedNames()
+        val names = if (target.equals("all", ignoreCase = true)) rt.store.names()
+        else listOf(rt.store.find(target)?.name ?: target)
+        val ok = ArrayList<String>()
+        val conflicts = ArrayList<String>()
+        val inUse = ArrayList<String>()
+        val missing = ArrayList<String>()
+        for (name in names) {
+            val key = name.lowercase(Locale.ROOT)
+            when {
+                rt.store.find(name) == null -> missing += name
+                key in protectedNames || rt.runtime.isOwned(name) || Bukkit.getWorld(name) != null -> inUse += name
+                java.io.File(server.worldContainer, name).exists() -> conflicts += name
+                else -> ok += name
+            }
+        }
+        return RestorePlan(ok, conflicts, inUse, missing)
+    }
+
+    fun runRestore(plan: RestorePlan, move: Boolean, sender: CommandSender) {
+        val rt = services ?: return
+        sender.sendMessage(ChatColor.GRAY.toString() + "Restoring ${plan.restorable.size} map(s) into the server root in the background...")
+        rt.io.submit {
+            var done = 0
+            val failed = ArrayList<String>()
+            for (name in plan.restorable) {
+                try {
+                    rt.store.restoreToRoot(name, move)
+                    done++
+                } catch (ex: Exception) {
+                    failed += name
+                    logger.warning("Could not restore map '$name': ${ex.message}")
+                }
+            }
+            val count = done
+            rt.bw.sync {
+                sender.sendMessage(ChatColor.GREEN.toString() + "Restored $count map(s) into ${server.worldContainer.path}" +
+                    if (move) " (removed from the library)." else " (copies stay in the library).")
+                if (failed.isNotEmpty()) sender.sendMessage(ChatColor.RED.toString() + "Failed: ${failed.joinToString(", ")} (see console).")
+            }
+        }
+    }
 }

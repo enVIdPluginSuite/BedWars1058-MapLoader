@@ -435,4 +435,31 @@ class WorldStoreTest {
         assertNull(s.find("alpha"))
         assertEquals(1, s.backupsOf("alpha").size)
     }
+
+    @Test
+    fun `restore puts a clean world back into the root and never overwrites`() {
+        val s = storeKeeping(2)
+        makeWorld(File(root, "lib/alpha"), "stored")
+        File(root, "lib/alpha/${FileOps.MARKER}").writeText("x")
+        s.rescan()
+        val dir = s.restoreToRoot("alpha", move = false)
+        assertEquals("stored", File(dir, "region/r.0.0.mca").readText())
+        assertTrue(File(dir, "level.dat").exists())
+        assertFalse(File(dir, FileOps.MARKER).exists())
+        assertNotNull(s.find("alpha")) // copy mode keeps the library entry
+        assertFailsWith<IOException> { s.restoreToRoot("alpha", move = false) }
+        assertEquals("stored", File(dir, "region/r.0.0.mca").readText())
+        assertFailsWith<IOException> { s.restoreToRoot("ghost", move = false) }
+    }
+
+    @Test
+    fun `restore with move removes the map from the library`() {
+        val s = storeKeeping(0)
+        zip(File(root, "lib").also { it.mkdirs() }.resolve("beta.zip"), mapOf("region/r.0.0.mca" to "z", "level.dat" to "l"))
+        s.rescan()
+        s.restoreToRoot("beta", move = true)
+        assertEquals("z", File(root, "beta/region/r.0.0.mca").readText())
+        assertNull(s.find("beta"))
+        assertFalse(File(root, ".beta.restoring").exists())
+    }
 }
