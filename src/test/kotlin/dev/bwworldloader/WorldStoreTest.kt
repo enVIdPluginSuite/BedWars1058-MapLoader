@@ -137,8 +137,9 @@ class WorldStoreTest {
         makeWorld(File(root, "bedwars_worlds/alpha"), "fresh")
         File(root, "alpha/region").mkdirs()
         File(root, "alpha/region/old.mca").writeText("stale")
+        File(root, "alpha/${FileOps.MARKER}").writeText("1") // a leftover copy made by this plugin
         s.rescan()
-        // root/alpha looks like a world, but the template wins because it exists in storage
+        // the leftover copy is disposable, so the template replaces it
         val res = assertIs<WorldStore.Materialized.Ready>(s.materialize("alpha", "alpha", emptySet(), true))
         assertFalse(File(res.worldDir, "region/old.mca").exists())
         assertEquals("fresh", File(res.worldDir, "region/r.0.0.mca").readText())
@@ -281,5 +282,157 @@ class WorldStoreTest {
         assertTrue(FileOps.isWorldFolder(b))
         assertTrue(FileOps.isWorldFolder(c))
         assertFalse(FileOps.isWorldFolder(d))
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // /bw setupArena safety
+    // ------------------------------------------------------------------------------------------
+
+    private fun storeKeeping(keep: Int, format: SaveFormat = SaveFormat.FOLDER): WorldStore {
+        val st = StorageSettings(path = "lib", formatOnSave = format, backupsToKeep = keep, indexRefreshSeconds = 0)
+        return WorldStore(root, log, st).also { it.rebind(st) }
+    }
+
+    @Test
+    fun `saving a setup world replaces the map and keeps the old version as a backup`() {
+        val s = storeKeeping(3)
+        makeWorld(File(root, "lib/alpha"), "v1")
+        s.rescan()
+        makeWorld(File(root, "alpha"), "v2")
+        s.saveFromRuntime("alpha", "alpha")
+        assertEquals("v2", File(root, "lib/alpha/region/r.0.0.mca").readText())
+        val backups = s.backupsOf("alpha")
+        assertEquals(1, backups.size)
+        assertEquals("v1", File(root, "lib/.backups/alpha/${backups[0]}/region/r.0.0.mca").readText())
+        assertFalse(File(root, "lib/.alpha.old").exists())
+        assertFalse(File(root, "lib/.alpha.saving").exists())
+        // backups are not mistaken for maps
+        assertEquals(listOf("alpha"), s.names())
+    }
+
+    @Test
+    fun `only the newest backups are kept`() {
+        val s = storeKeeping(2)
+        makeWorld(File(root, "lib/alpha"), "v0")
+        s.rescan()
+        for (i in 1..4) {
+            File(root, "alpha").let { FileOps.deleteRecursively(it.toPath()) }
+            makeWorld(File(root, "alpha"), "v$i")
+            s.saveFromRuntime("alpha", "alpha")
+            Thread.sleep(5)
+        }
+        assertEquals(2, s.backupsOf("alpha").size)
+        assertEquals("v4", File(root, "lib/alpha/region/r.0.0.mca").readText())
+    }
+
+    @Test
+    fun `a failed save leaves the stored map untouched`() {
+        val s = storeKeeping(3)
+        makeWorld(File(root, "lib/alpha"), "precious")
+        s.rescan()
+        // the runtime folder is gone (e.g. a failed start): the save must refuse and not harm the library
+        assertFailsWith<IllegalArgumentException> { s.saveFromRuntime("alpha", "alpha") }
+        assertEquals("precious", File(root, "lib/alpha/region/r.0.0.mca").readText())
+        // a world folder that is not a world at all is refused as well
+        File(root, "alpha").mkdirs()
+        File(root, "alpha/junk.txt").writeText("x")
+        assertFailsWith<IllegalArgumentException> { s.saveFromRuntime("alpha", "alpha") }
+        assertEquals("precious", File(root, "lib/alpha/region/r.0.0.mca").readText())
+    }
+
+    @Test
+    fun `zip format also keeps a backup and swaps atomically`() {
+        val s = storeKeeping(3, SaveFormat.ZIP)
+        zip(File(root, "lib").also { it.mkdirs() }.resolve("alpha.zip"), mapOf("region/r.0.0.mca" to "old", "level.dat" to "l"))
+        s.rescan()
+        makeWorld(File(root, "alpha"), "new")
+        s.saveFromRuntime("alpha", "alpha")
+        assertEquals(1, s.backupsOf("alpha").size)
+        assertTrue(s.backupsOf("alpha")[0].endsWith(".zip"))
+        val out = File(root, "x").also { it.mkdirs() }
+        FileOps.unzip(File(root, "lib/alpha.zip").toPath(), out.toPath())
+        assertEquals("new", File(out, "region/r.0.0.mca").readText())
+        assertFalse(File(root, "lib/alpha.zip.tmp").exists())
+    }
+
+    @Test
+    fun `with backups disabled the old version is simply replaced, but force-backup still keeps one`() {
+        val s = storeKeeping(0)
+        makeWorld(File(root, "lib/alpha"), "v1")
+        s.rescan()
+        makeWorld(File(root, "alpha"), "v2")
+        s.saveFromRuntime("alpha", "alpha")
+        assertTrue(s.backupsOf("alpha").isEmpty())
+        FileOps.deleteRecursively(File(root, "alpha").toPath())
+        makeWorld(File(root, "alpha"), "v3")
+        s.saveFromRuntime("alpha", "alpha", forceBackup = true)
+        assertEquals(1, s.backupsOf("alpha").size)
+    }
+
+    @Test
+    fun `setup markers never end up in the library`() {
+        val s = storeKeeping(3)
+        makeWorld(File(root, "alpha"), "edit")
+        File(root, "alpha/${FileOps.SETUP_MARKER}").writeText("1")
+        s.saveFromRuntime("alpha", "alpha")
+        assertFalse(File(root, "lib/alpha/${FileOps.SETUP_MARKER}").exists())
+        assertTrue(File(root, "lib/alpha/region/r.0.0.mca").exists())
+    }
+
+    @Test
+    fun `materialize refuses to overwrite unsaved setup work or a foreign world`() {
+        val s = storeKeeping(3)
+        makeWorld(File(root, "lib/alpha"), "stored")
+        s.rescan()
+        // unsaved setup work from a crash
+        makeWorld(File(root, "alpha"), "unsaved")
+        File(root, "alpha/${FileOps.SETUP_MARKER}").writeText("1")
+        val r1 = s.materialize("alpha", "alpha", emptySet(), true)
+        val failed = assertIs<WorldStore.Materialized.Failed>(r1)
+        assertIs<dev.bwworldloader.storage.UnsafeTargetException>(failed.error)
+        assertEquals("unsaved", File(root, "alpha/region/r.0.0.mca").readText())
+        // an unrelated world of the admin with the same name (no marker)
+        FileOps.deleteRecursively(File(root, "alpha").toPath())
+        makeWorld(File(root, "alpha"), "admins-own-world")
+        val r2 = s.materialize("alpha", "alpha", emptySet(), true)
+        assertIs<dev.bwworldloader.storage.UnsafeTargetException>(assertIs<WorldStore.Materialized.Failed>(r2).error)
+        assertEquals("admins-own-world", File(root, "alpha/region/r.0.0.mca").readText())
+        // a disposable runtime copy is replaced as before
+        FileOps.deleteRecursively(File(root, "alpha").toPath())
+        makeWorld(File(root, "alpha"), "stale")
+        File(root, "alpha/${FileOps.MARKER}").writeText("1")
+        assertIs<WorldStore.Materialized.Ready>(s.materialize("alpha", "alpha", emptySet(), true))
+        assertEquals("stored", File(root, "alpha/region/r.0.0.mca").readText())
+    }
+
+    @Test
+    fun `a setup copy is marked with the setup marker and keeps level dat`() {
+        val s = storeKeeping(3)
+        makeWorld(File(root, "lib/alpha"), "stored")
+        s.rescan()
+        val res = assertIs<WorldStore.Materialized.Ready>(s.materialize("alpha", "alpha", emptySet(), deleteLevelDat = false, setup = true))
+        assertTrue(File(res.worldDir, FileOps.SETUP_MARKER).exists())
+        assertFalse(File(res.worldDir, FileOps.MARKER).exists())
+        assertTrue(File(res.worldDir, "level.dat").exists())
+    }
+
+    @Test
+    fun `pending save is tracked`() {
+        val s = storeKeeping(3)
+        assertFalse(s.hasPendingSave("Alpha"))
+        s.beginPendingSave("alpha")
+        assertTrue(s.hasPendingSave("ALPHA"))
+        s.endPendingSave("Alpha")
+        assertFalse(s.hasPendingSave("alpha"))
+    }
+
+    @Test
+    fun `deleting a map archives it when backups are on`() {
+        val s = storeKeeping(2)
+        makeWorld(File(root, "lib/alpha"), "v1")
+        s.rescan()
+        assertTrue(s.delete("alpha"))
+        assertNull(s.find("alpha"))
+        assertEquals(1, s.backupsOf("alpha").size)
     }
 }

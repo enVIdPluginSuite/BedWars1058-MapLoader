@@ -41,6 +41,7 @@ object ConfigKeys {
         KeySpec("storage.format-on-save", ValueType.Choice(formats), "How maps are stored after /bw setupArena (FOLDER or ZIP)"),
         KeySpec("storage.import-from-root", ValueType.Bool, "Move maps found in the server root into the storage folder on first use"),
         KeySpec("storage.index-refresh-seconds", ValueType.IntRange(0, 3600), "How long the folder listing is cached (0 = always rescan)"),
+        KeySpec("storage.backups-to-keep", ValueType.IntRange(0, 50), "Old versions of a map kept when /bw setupArena or a delete replaces it"),
 
         KeySpec("loading.mode", ValueType.Choice(modes), "LAZY = just-in-time warm pool, EAGER = load every arena (staggered)"),
         KeySpec("loading.warm-arenas-per-group", ValueType.IntRange(0, 1000), "Joinable arenas kept ready per arena group"),

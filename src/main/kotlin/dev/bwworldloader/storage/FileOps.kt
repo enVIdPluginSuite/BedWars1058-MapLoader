@@ -16,7 +16,18 @@ import java.util.zip.ZipOutputStream
 object FileOps {
 
     /** Dropped into every runtime world copy we create, so leftovers of a crash can be recognised and removed. */
-    const val MARKER = ".bwworldloader-runtime"
+    const val MARKER = ".maploader-runtime"
+
+    /**
+     * Dropped into the world a builder is editing during `/bw setupArena`. Unlike [MARKER] copies, which are
+     * disposable, a setup world holds unsaved work: after a crash it is recovered into the map library, never deleted.
+     */
+    const val SETUP_MARKER = ".maploader-setup"
+
+    fun isMarker(rel: String): Boolean = rel == MARKER || rel == SETUP_MARKER
+
+    /** True when [dir] is a world folder this plugin created (disposable copy or setup world). */
+    fun hasAnyMarker(dir: File): Boolean = File(dir, MARKER).exists() || File(dir, SETUP_MARKER).exists()
 
     private val WORLD_ROOT_TRASH = setOf("level.dat", "level.dat_old", "level.dat_mcr", "session.lock", "uid.dat")
 
@@ -29,13 +40,13 @@ object FileOps {
 
     /** Skip rule used when materializing a world for play. */
     fun runtimeSkip(deleteLevelDat: Boolean): (String) -> Boolean = { rel ->
-        rel == MARKER || rel.endsWith("/session.lock") || rel == "session.lock" || rel == "uid.dat" ||
+        isMarker(rel) || rel.endsWith("/session.lock") || rel == "session.lock" || rel == "uid.dat" ||
             (deleteLevelDat && (rel == "level.dat" || rel == "level.dat_old" || rel == "level.dat_mcr"))
     }
 
     /** Skip rule used when storing a world as a template. */
     val storeSkip: (String) -> Boolean = { rel ->
-        rel == MARKER || rel == "session.lock" || rel.endsWith("/session.lock") || rel == "uid.dat"
+        isMarker(rel) || rel == "session.lock" || rel.endsWith("/session.lock") || rel == "uid.dat"
     }
 
     // ---------------------------------------------------------------------------------------------

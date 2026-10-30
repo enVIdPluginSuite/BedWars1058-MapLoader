@@ -2,6 +2,7 @@ package dev.bwworldloader.world
 
 import dev.bwworldloader.BwContext
 import dev.bwworldloader.storage.FileOps
+import dev.bwworldloader.storage.NameLocks
 import org.bukkit.Bukkit
 import java.io.File
 import java.util.Locale
@@ -22,6 +23,13 @@ class RuntimeWorlds(
     private val log: Logger,
 ) {
     private val owned: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    /**
+     * Saves a world left behind by an interrupted `/bw setupArena` session into the map library; true when the
+     * folder may be removed afterwards. Installed by the plugin. While it is missing, setup worlds are never deleted.
+     */
+    @Volatile
+    var setupRecovery: ((String) -> Boolean)? = null
 
     fun isOwned(worldName: String): Boolean = owned.contains(worldName.lowercase(Locale.ROOT))
 
@@ -77,43 +85,56 @@ class RuntimeWorlds(
                 return
             }
         }
-        deleteRuntimeCopy(worldName)
+        deleteRuntimeCopy(worldName, System.currentTimeMillis())
     }
 
     /**
      * Removes a half-copied runtime folder after a failed [dev.bwworldloader.storage.WorldStore.materialize].
-     * Only folders that carry our marker are touched, so a real map or the main world is never at risk.
+     * Only folders that carry our marker are touched (setup worlds only with [includeSetup]), so a real map or the main world is never at risk.
      */
-    fun deleteMarkedCopy(worldName: String) {
+    fun deleteMarkedCopy(worldName: String, includeSetup: Boolean = false) {
         val dir = File(serverRoot, worldName)
-        if (!File(dir, FileOps.MARKER).exists()) return
+        val marked = File(dir, FileOps.MARKER).exists() || (includeSetup && File(dir, FileOps.SETUP_MARKER).exists())
+        if (!marked) return
         io.submit {
             try {
-                FileOps.deleteRecursively(dir.toPath())
+                NameLocks.with(NameLocks.rt(worldName)) { FileOps.deleteRecursively(dir.toPath()) }
             } catch (ex: Exception) {
                 log.warning("Could not delete partial runtime world '$worldName': ${ex.message}")
             }
         }
     }
 
-    private fun deleteRuntimeCopy(worldName: String) {
+    private fun deleteRuntimeCopy(worldName: String, unloadedAt: Long) {
         if (!isOwned(worldName)) return
-        if (bw.isShuttingDown()) deleteNow(worldName) else io.submit { deleteNow(worldName) }
+        if (bw.isShuttingDown()) deleteNow(worldName, unloadedAt) else io.submit { deleteNow(worldName, unloadedAt) }
     }
 
     /**
      * Blocking deletion of an owned runtime copy; for the IO thread or the shutdown path.
-     * Returns true when the folder is gone. Worlds we do not own are never touched.
+     * Returns true when the folder is gone. Worlds we do not own are never touched, and neither is
+     *  - a world holding unsaved setup work, unless [allowSetup] (the caller has just saved it), and
+     *  - a copy created at or after [unloadedAt]: a deletion queued for an arena that was unloaded must not hit
+     *    the fresh copy that a new arena or setup session of the same name has created in the meantime.
      */
-    fun deleteNow(worldName: String): Boolean {
+    fun deleteNow(worldName: String, unloadedAt: Long? = null, allowSetup: Boolean = false): Boolean {
         if (!isOwned(worldName)) return false
-        return try {
-            FileOps.deleteRecursively(File(serverRoot, worldName).toPath())
-            owned.remove(worldName.lowercase(Locale.ROOT))
-            true
-        } catch (ex: Exception) {
-            log.warning("Could not delete runtime world '$worldName': ${ex.message}. It will be removed on the next start.")
-            false
+        return NameLocks.with(NameLocks.rt(worldName)) {
+            try {
+                val dir = File(serverRoot, worldName)
+                val setupMarker = File(dir, FileOps.SETUP_MARKER)
+                if (setupMarker.exists() && !allowSetup) return@with false
+                if (unloadedAt != null) {
+                    val created = File(dir, FileOps.MARKER).takeIf { it.exists() }?.readText()?.trim()?.toLongOrNull()
+                    if (created != null && created >= unloadedAt) return@with false
+                }
+                FileOps.deleteRecursively(dir.toPath())
+                owned.remove(worldName.lowercase(Locale.ROOT))
+                true
+            } catch (ex: Exception) {
+                log.warning("Could not delete runtime world '$worldName': ${ex.message}. It will be removed on the next start.")
+                false
+            }
         }
     }
 
@@ -129,8 +150,26 @@ class RuntimeWorlds(
         for (d in kids) {
             if (!d.isDirectory) continue
             val key = d.name.lowercase(Locale.ROOT)
-            if (key in loaded || key in keep) continue
-            if (File(d, FileOps.MARKER).exists() || d.name.startsWith("bw_temp_")) {
+            if (key in loaded) continue
+            val setupWorld = File(d, FileOps.SETUP_MARKER).exists()
+            // arenas about to load are skipped, but a setup world with the same name must still be rescued first
+            if (key in keep && !setupWorld) continue
+            if (setupWorld) {
+                // Unsaved /bw setupArena work from a crash: save it into the library, never just delete it.
+                val recover = setupRecovery
+                if (recover == null) {
+                    log.warning("World '${d.name}' holds unsaved setup work and was left in place.")
+                } else if (recover(d.name)) {
+                    try {
+                        FileOps.deleteRecursively(d.toPath())
+                        removed++
+                    } catch (ex: Exception) {
+                        log.warning("Could not remove recovered setup world '${d.name}': ${ex.message}")
+                    }
+                } else {
+                    log.warning("Could not save the unfinished setup of '${d.name}' into the library; the world stays in the server root.")
+                }
+            } else if (File(d, FileOps.MARKER).exists() || d.name.startsWith("bw_temp_")) {
                 try {
                     FileOps.deleteRecursively(d.toPath())
                     removed++
@@ -139,7 +178,7 @@ class RuntimeWorlds(
                 }
             }
         }
-        if (removed > 0) log.info("Removed $removed leftover runtime world(s) from a previous run.")
+        if (removed > 0) log.info("Cleaned up $removed leftover world copy/copies from a previous run.")
         return removed
     }
 }

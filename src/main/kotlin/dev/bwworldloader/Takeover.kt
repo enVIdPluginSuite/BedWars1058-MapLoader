@@ -68,7 +68,7 @@ class Takeover(
         if (store.find(head.arenaName) == null) return // nothing stored: the built-in adapter uses the map in the root
         try {
             val zip = File(bw.stockCacheDir, head.arenaName + ".zip")
-            val backup = File(bw.stockCacheDir, head.arenaName + ".zip.bwworldloader-bak")
+            val backup = File(bw.stockCacheDir, head.arenaName + ".zip.maploader-bak")
             bw.stockCacheDir.mkdirs()
             var kept: File? = null
             if (zip.exists()) {

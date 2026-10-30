@@ -154,6 +154,7 @@ class ConfigService(private val plugin: JavaPlugin) {
             "storage.format-on-save" -> s.storage.formatOnSave.name
             "storage.import-from-root" -> s.storage.importFromRoot.toString()
             "storage.index-refresh-seconds" -> s.storage.indexRefreshSeconds.toString()
+            "storage.backups-to-keep" -> s.storage.backupsToKeep.toString()
             "loading.mode" -> s.loading.mode.name
             "loading.warm-arenas-per-group" -> s.loading.warmPerGroup.toString()
             "loading.selection" -> s.loading.selection.name

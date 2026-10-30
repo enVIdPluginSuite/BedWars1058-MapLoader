@@ -1,5 +1,5 @@
 # ===========================================================================================
-#  BedWarsWorldLoader  -  just-in-time map loading for BedWars1058
+#  BedWars1058-MapLoader  -  just-in-time map loading for BedWars1058
 # ===========================================================================================
 #  Everything below can be changed in-game with   /bwloader config set <key> <value>
 #  and applied without a restart with             /bwloader reload
@@ -27,6 +27,11 @@ storage:
   # The folder listing is cached for this many seconds (0 = look at the disk every time).
   # A map you drop into the folder is also noticed on the next lookup, so this rarely matters.
   index-refresh-seconds: 30
+
+  # Safety net for /bw setupArena: whenever saving a map (or deleting one) replaces an existing version, the
+  # old version is kept in <path>/.backups/<arena>/ and only the newest N are retained. 0 = keep none.
+  # (Recovering unsaved work after a crash always keeps at least one backup.)
+  backups-to-keep: 3
 
 loading:
   # LAZY  = just-in-time. Arenas are "parked" and only a few joinable arenas per group are kept

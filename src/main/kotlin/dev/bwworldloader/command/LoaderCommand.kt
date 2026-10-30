@@ -17,13 +17,13 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
     private val subcommands = listOf("help", "status", "reload", "config", "scan", "activate", "migrate")
 
     override fun onCommand(sender: CommandSender, command: Command, label: String, args: Array<out String>): Boolean {
-        if (!sender.hasPermission("bwworldloader.admin")) {
+        if (!sender.hasPermission("bw1058maploader.admin")) {
             sender.sendMessage(ChatColor.RED.toString() + "You do not have permission to do that.")
             return true
         }
         val rt = plugin.services
         if (rt == null) {
-            sender.sendMessage(err("BedWarsWorldLoader is not active (see the console for the reason)."))
+            sender.sendMessage(err("BedWars1058-MapLoader is not active (see the console for the reason)."))
             return true
         }
         when (args.firstOrNull()?.lowercase(Locale.ROOT) ?: "help") {
@@ -48,7 +48,7 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
     // ---------------------------------------------------------------------------------------------
 
     private fun help(s: CommandSender, label: String) {
-        s.sendMessage(title("BedWarsWorldLoader"))
+        s.sendMessage(title("BedWars1058-MapLoader"))
         for ((cmd, desc) in listOf(
             "status" to "Show mode, map library and arena pool",
             "reload" to "Reload config.yml and apply it immediately",
@@ -67,7 +67,7 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
         val rt = plugin.services ?: return
         val cfg = rt.settingsService.settings
         val kinds = rt.store.templates().groupingBy { it.kind }.eachCount()
-        s.sendMessage(title("BedWarsWorldLoader ${plugin.description.version}"))
+        s.sendMessage(title("BedWars1058-MapLoader ${plugin.description.version}"))
         val modeNote = if (!rt.pool.lazyActive() && cfg.loading.mode == dev.bwworldloader.config.LoadMode.LAZY)
             " ${ChatColor.RED}(inactive: BungeeCord mode loads on demand by itself)" else ""
         s.sendMessage(line("Mode", "${cfg.loading.mode}$modeNote${ChatColor.GRAY}, ${cfg.loading.warmPerGroup} warm per group, selection ${cfg.loading.selection}"))
@@ -160,7 +160,7 @@ class LoaderCommand(private val plugin: WorldLoaderPlugin) : CommandExecutor, Ta
     // ---------------------------------------------------------------------------------------------
 
     override fun onTabComplete(sender: CommandSender, command: Command, alias: String, args: Array<out String>): List<String> {
-        if (!sender.hasPermission("bwworldloader.admin")) return emptyList()
+        if (!sender.hasPermission("bw1058maploader.admin")) return emptyList()
         val rt = plugin.services ?: return emptyList()
         val prefix = args.lastOrNull()?.lowercase(Locale.ROOT) ?: ""
         val options: List<String> = when {

@@ -7,6 +7,7 @@ import dev.bwworldloader.config.ConfigService
 import dev.bwworldloader.config.LoadMode
 import dev.bwworldloader.listener.ArenaListener
 import dev.bwworldloader.pool.ArenaPool
+import dev.bwworldloader.storage.FileOps
 import dev.bwworldloader.storage.WorldStore
 import dev.bwworldloader.world.IoExecutor
 import dev.bwworldloader.world.RuntimeWorlds
@@ -14,8 +15,15 @@ import dev.bwworldloader.world.WorldActivator
 import org.bukkit.Bukkit
 import org.bukkit.ChatColor
 import org.bukkit.command.CommandSender
+import org.bukkit.event.EventHandler
+import org.bukkit.event.HandlerList
+import org.bukkit.event.Listener
+import org.bukkit.event.server.PluginEnableEvent
+import org.bukkit.plugin.Plugin
 import org.bukkit.plugin.java.JavaPlugin
 import java.util.Locale
+import java.util.logging.Filter
+import java.util.logging.Logger
 
 /** Everything that exists while the plugin is active; `null` in [WorldLoaderPlugin.services] otherwise. */
 class Services(
@@ -30,36 +38,93 @@ class Services(
     val takeover: Takeover,
 )
 
+/** Calls [onEnabled] once BedWars1058 has finished enabling (its arenas exist by then). */
+class BedWarsEnableListener(private val bedwars: Plugin, private val onEnabled: () -> Unit) : Listener {
+    @EventHandler
+    fun onPluginEnable(e: PluginEnableEvent) {
+        if (e.plugin === bedwars) {
+            HandlerList.unregisterAll(this)
+            onEnabled()
+        }
+    }
+}
+
 class WorldLoaderPlugin : JavaPlugin() {
 
     @Volatile
     var services: Services? = null
         private set
 
+    private var settingsService: ConfigService? = null
+    private var earlyStore: WorldStore? = null
+    private var filteredLogger: Logger? = null
+    private var previousFilter: Filter? = null
+    private var hooked = false
+
     data class ReloadOutcome(val ok: Boolean, val message: String, val warnings: List<String> = emptyList())
 
     data class MigrationPlan(val movable: List<String>, val alreadyStored: List<String>, val inUse: List<String>)
 
+    /**
+     * This plugin is enabled BEFORE BedWars1058 (`loadbefore` in plugin.yml) so it can silence BedWars' startup
+     * warnings about maps that live in the library. The real work starts in [hook] when BedWars is done enabling.
+     */
     override fun onEnable() {
+        val cfg = ConfigService(this)
+        cfg.load().forEach { logger.warning(it) }
+        settingsService = cfg
+        val store = WorldStore(server.worldContainer, logger, cfg.settings.storage)
+        store.rebind(cfg.settings.storage)
+        earlyStore = store
+
         val bwPlugin = server.pluginManager.getPlugin("BedWars1058")
-        if (bwPlugin == null || !bwPlugin.isEnabled) {
-            logger.severe("BedWars1058 is not installed or failed to enable. Disabling.")
+        if (bwPlugin == null) {
+            logger.severe("BedWars1058 is not installed. Disabling.")
             server.pluginManager.disablePlugin(this)
             return
         }
+        installWarningFilter(bwPlugin, store)
+
+        if (bwPlugin.isEnabled) {
+            hook(bwPlugin) // this plugin was loaded late (plugin manager / reload): BedWars is already running
+        } else {
+            server.pluginManager.registerEvents(BedWarsEnableListener(bwPlugin) { hook(bwPlugin) }, this)
+            server.scheduler.runTask(this, Runnable {
+                if (!hooked && !bwPlugin.isEnabled) {
+                    logger.severe("BedWars1058 did not enable, so BedWars1058-MapLoader stays inactive.")
+                }
+            })
+        }
+    }
+
+    private fun installWarningFilter(bwPlugin: Plugin, store: WorldStore) {
+        val target = bwPlugin.logger
+        previousFilter = target.filter
+        filteredLogger = target
+        target.filter = MapWarningFilter({ name -> store.exists(name) }, previousFilter)
+    }
+
+    private fun removeWarningFilter() {
+        val target = filteredLogger ?: return
+        if (target.filter is MapWarningFilter) target.filter = previousFilter
+        filteredLogger = null
+    }
+
+    /** BedWars1058 finished enabling: take over its world loading. */
+    private fun hook(bwPlugin: Plugin) {
+        if (hooked) return
+        val settingsService = settingsService ?: return
+        val store = earlyStore ?: return
         val api = server.servicesManager.getRegistration(BedWars::class.java)?.provider
         if (api == null) {
             logger.severe("BedWars1058 did not register its API. Disabling.")
             server.pluginManager.disablePlugin(this)
             return
         }
-
-        val settingsService = ConfigService(this)
-        settingsService.load().forEach { logger.warning(it) }
         val settings = { settingsService.settings }
 
         val built = try {
-            build(BwContext(this, api, bwPlugin), settingsService, settings)
+            build(BwContext(this, api, bwPlugin), settingsService, store, settings)
         } catch (ex: LinkageError) {
             logger.severe("This BedWars1058 version is not compatible with this plugin (${ex.javaClass.simpleName}: ${ex.message}).")
             server.pluginManager.disablePlugin(this)
@@ -71,6 +136,7 @@ class WorldLoaderPlugin : JavaPlugin() {
             server.pluginManager.disablePlugin(this)
             return
         }
+        hooked = true
         services = built
 
         server.pluginManager.registerEvents(ArenaListener(built.pool, built.takeover, settings), this)
@@ -81,6 +147,8 @@ class WorldLoaderPlugin : JavaPlugin() {
         }
         built.pool.onStall = { head -> built.adapter.skipStuck(head) }
         server.scheduler.runTaskTimer(this, Runnable { built.pool.tick() }, 40L, 20L)
+        // flush worlds that are being edited with /bw setupArena every 2 minutes
+        server.scheduler.runTaskTimer(this, Runnable { built.adapter.checkpointSetupWorlds() }, 2400L, 2400L)
 
         built.takeover.registerMissingArenas(this) { built.pool.requestRefill() }
 
@@ -89,23 +157,41 @@ class WorldLoaderPlugin : JavaPlugin() {
             "${s.loading.warmPerGroup} warm arena(s) per group.")
     }
 
-    private fun build(bw: BwContext, cfg: ConfigService, settings: () -> dev.bwworldloader.config.LoaderSettings): Services {
+    private fun build(bw: BwContext, cfg: ConfigService, store: WorldStore, settings: () -> dev.bwworldloader.config.LoaderSettings): Services {
         val initial = cfg.settings
         val io = IoExecutor(logger, initial.loading.ioThreads)
-        val store = WorldStore(server.worldContainer, logger, initial.storage)
-        store.rebind(initial.storage)
         val runtime = RuntimeWorlds(bw, io, server.worldContainer, logger)
+        runtime.setupRecovery = { worldName ->
+            val dir = java.io.File(server.worldContainer, worldName)
+            if (!FileOps.isWorldFolder(dir)) {
+                true // an empty leftover: nothing to save
+            } else {
+                try {
+                    store.saveFromRuntime(worldName, worldName, forceBackup = true)
+                    logger.warning("Recovered unsaved /bw setupArena work for '$worldName' after an unclean shutdown: " +
+                        "it was saved into the library (the previous version is in ${store.storageDir.resolve(".backups").resolve(worldName)}).")
+                    true
+                } catch (ex: Exception) {
+                    logger.log(java.util.logging.Level.SEVERE, "Could not recover setup work for '$worldName'", ex)
+                    false
+                }
+            }
+        }
         val pool = ArenaPool(bw, settings, logger)
         val activator = WorldActivator(bw, store, runtime, pool, io, settings, logger)
         val adapter = LoaderRestoreAdapter(this, bw, store, runtime, pool, activator, io, settings, server.worldContainer, logger)
+        activator.isSetupWorld = { name -> adapter.isSetupWorld(name) }
         val takeover = Takeover(bw, store, runtime, pool, adapter, settings, logger)
         return Services(bw, cfg, io, store, runtime, pool, activator, adapter, takeover)
     }
 
     override fun onDisable() {
+        removeWarningFilter()
         val rt = services ?: return
         server.scheduler.cancelTasks(this)
         rt.takeover.cleanupSeeds()
+        // Anyone still running /bw setupArena: save their work into the library before the server stops.
+        rt.adapter.finishSetupSessions()
         rt.io.shutdown(15)
         // Intentionally keep the services reference: BedWars1058 disables its arenas AFTER this plugin
         // and still calls the restore adapter, which then runs synchronously (see BwContext.isShuttingDown).

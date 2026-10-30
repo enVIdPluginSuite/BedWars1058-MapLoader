@@ -26,6 +26,8 @@ data class StorageSettings(
     val formatOnSave: SaveFormat = SaveFormat.FOLDER,
     val importFromRoot: Boolean = true,
     val indexRefreshSeconds: Int = 30,
+    /** Previous versions of a map kept in `<storage>/.backups` whenever a setup session or delete replaces it. */
+    val backupsToKeep: Int = 3,
 )
 
 data class JitJoinSettings(
@@ -99,6 +101,7 @@ object SettingsParser {
             formatOnSave = p.enum("storage.format-on-save", d.storage.formatOnSave),
             importFromRoot = p.bool("storage.import-from-root", d.storage.importFromRoot),
             indexRefreshSeconds = p.int("storage.index-refresh-seconds", d.storage.indexRefreshSeconds, 0, 3600),
+            backupsToKeep = p.int("storage.backups-to-keep", d.storage.backupsToKeep, 0, 50),
         )
 
         val overrides = LinkedHashMap<String, Int>()

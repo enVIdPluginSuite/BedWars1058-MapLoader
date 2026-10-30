@@ -4,6 +4,7 @@ import com.andrei1058.bedwars.api.arena.IArena
 import dev.bwworldloader.BwContext
 import dev.bwworldloader.config.LoaderSettings
 import dev.bwworldloader.pool.ArenaPool
+import dev.bwworldloader.storage.UnsafeTargetException
 import dev.bwworldloader.storage.WorldStore
 import org.bukkit.Bukkit
 import org.bukkit.World
@@ -27,13 +28,39 @@ class WorldActivator(
     private val log: Logger,
 ) {
     private var lastCreateNanos = 0L
+
+    /** True while a `/bw setupArena` session owns the world of that name (set by the restore adapter). */
+    @Volatile
+    var isSetupWorld: (String) -> Boolean = { false }
     private val voidGenerator: ChunkGenerator? by lazy { VoidGenerators.create(log) }
 
     /** Starts loading [a]. BedWars1058 initialises the arena itself when the world's `WorldLoadEvent` fires. */
     fun load(a: IArena) {
+        pool.markLoading(a)
+        loadWhenLibraryIsSettled(a, 0L)
+    }
+
+    /**
+     * `/bw setupArena` writes the edited map back to the library in the background after the session ends, and
+     * BedWars1058 re-creates the arena immediately. Wait (without blocking anything) until that save is done,
+     * otherwise the arena would start from the old version of the map - or even be handed the setup world.
+     */
+    private fun loadWhenLibraryIsSettled(a: IArena, waitedTicks: Long) {
+        if (store.hasPendingSave(a.arenaName) && !bw.isShuttingDown() && waitedTicks < 1200L) {
+            bw.syncLater(10L) { loadWhenLibraryIsSettled(a, waitedTicks + 10L) }
+            return
+        }
+        loadNow(a)
+    }
+
+    private fun loadNow(a: IArena) {
         val arenaName = a.arenaName
         val worldName = a.worldName
-        pool.markLoading(a)
+
+        if (isSetupWorld(worldName)) {
+            fail(a, "its map is being edited in a /bw setupArena session right now", unload = false)
+            return
+        }
 
         // Already loaded (for example by BedWars' own adapter): just hand it over, like the stock adapter does.
         val existing = Bukkit.getWorld(worldName)
@@ -56,7 +83,7 @@ class WorldActivator(
                 fail(a, "no map named '${a.arenaName}' was found in ${result.searched}", unload = false)
             is WorldStore.Materialized.Failed -> {
                 log.log(Level.SEVERE, "Failed to prepare the world for arena '${a.arenaName}'", result.error)
-                runtime.deleteMarkedCopy(a.worldName)
+                if (result.error !is UnsafeTargetException) runtime.deleteMarkedCopy(a.worldName)
                 fail(a, result.error.message ?: result.error.javaClass.simpleName, unload = false)
             }
             is WorldStore.Materialized.Ready -> {
