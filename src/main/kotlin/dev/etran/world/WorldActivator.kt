@@ -80,7 +80,7 @@ class WorldActivator(
     private fun afterMaterialize(a: IArena, result: WorldStore.Materialized) {
         when (result) {
             is WorldStore.Materialized.Missing ->
-                fail(a, "no map named '${a.arenaName}' was found in ${result.searched}", unload = false)
+                fail(a, "no map named '${store.templateNameFor(a.arenaName)}' was found in ${result.searched}", unload = false)
             is WorldStore.Materialized.Failed -> {
                 log.log(Level.SEVERE, "Failed to prepare the world for arena '${a.arenaName}'", result.error)
                 if (result.error !is UnsafeTargetException) runtime.deleteMarkedCopy(a.worldName)

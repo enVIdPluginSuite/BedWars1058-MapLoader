@@ -9,7 +9,7 @@ Fixes slow startups and freezes on BedWars1058 servers with hundreds of arena wo
 * Existing worlds in the root are moved into the library on first use (`storage.import-from-root`) or all at once with `/bwloader migrate confirm`.
 
 ## Install
-1. Put `BedWars1058-MapLoader-3.5.1.jar` in `plugins/` next to BedWars1058 (required).
+1. Put `BedWars1058-MapLoader-3.6.0.jar` in `plugins/` next to BedWars1058 (required).
 2. Start once, edit `plugins/BedWars1058-MapLoader/config.yml` (or use commands), run `/bwloader migrate`, then `/bwloader migrate confirm`.
 
 ## Commands (permission `bw1058maploader.admin`, aliases `/bwl`)
@@ -33,6 +33,9 @@ Example: `/bwloader config set storage.path /srv/mc/shared_maps`, `/bwloader con
 * When the session ends (or the server stops) the world is unloaded and written back to the library: the new version is written and verified first, then swapped in. The previous version goes to `<library>/.backups/<arena>/` (newest `storage.backups-to-keep`, default 3).
 * If the server crashes mid-session, the edited world stays in the server root marked `.maploader-setup`. On the next start it is saved into the library automatically (with a backup of the old version) and logged. It is never deleted before it is saved.
 * A failed or cancelled session start can never overwrite the stored map. An arena of the same name waits until the save has finished. The plugin never deletes a folder in the server root that it did not create; if a same-named world of yours is there, the arena refuses to load and tells you to run `/bwloader migrate`.
+
+## Map aliases (BedWars1058-MultiGroup)
+Add-ons can register arenas that are played on another arena's map (`dev.bwworldloader.api.MapAliases`). BedWars1058-MultiGroup uses this for its per-group variants: `lighthouse-doubles` is loaded from the library map `lighthouse`, parked, listed and loaded just-in-time like every other arena, and the map is stored once. Aliases only affect *loading*; `/bw setupArena`, delete, clone, migrate and restore always use the exact arena name, so an alias can never overwrite or remove the map it points to. Nothing changes when no add-on registers aliases.
 
 ## Compatibility
 Spigot/Paper 1.8 – 26.x (compiled against 1.8.8 API, 1.13+ void generator loaded by reflection). Java 11+ runtime for the plugin itself (use whatever your server needs; 26.x needs Java 25).

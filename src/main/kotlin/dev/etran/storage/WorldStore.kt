@@ -1,5 +1,6 @@
 package dev.etran.storage
 
+import dev.etran.api.MapAliases
 import dev.etran.config.SaveFormat
 import dev.etran.config.StorageSettings
 import java.io.File
@@ -148,9 +149,17 @@ class WorldStore(
             .sorted()
     }
 
-    /** True if a map called [name] can be loaded (in storage, or importable from the root). */
-    fun exists(name: String): Boolean =
-        find(name) != null || (settings.importFromRoot && legacyRootWorld(name) != null)
+    /**
+     * The map an arena is played on: normally the arena's own name, or another map when an add-on registered an alias
+     * for it ([MapAliases], e.g. BedWars1058-MultiGroup variants). Only used for loading, never for saving/deleting.
+     */
+    fun templateNameFor(arenaName: String): String = MapAliases.resolve(arenaName) ?: arenaName
+
+    /** True if the map of arena [name] can be loaded (in storage, or importable from the root). Follows aliases. */
+    fun exists(name: String): Boolean {
+        val t = templateNameFor(name)
+        return find(t) != null || (settings.importFromRoot && legacyRootWorld(t) != null)
+    }
 
     // ---------------------------------------------------------------------------------------------
     // Operations (blocking; call from the IO executor)
@@ -169,20 +178,23 @@ class WorldStore(
         setup: Boolean = false,
     ): Materialized {
         val safeArena = safeName(arenaName) ?: return Materialized.Failed(IllegalArgumentException("Illegal arena name '$arenaName'"))
+        // the map to copy: an alias (another arena's map) for play, but always the arena's own map for /bw setupArena
+        val safeTemplate = if (setup) safeArena else safeName(templateNameFor(safeArena))
+            ?: return Materialized.Failed(IllegalArgumentException("Illegal map name '${templateNameFor(safeArena)}' for arena '$arenaName'"))
         val safeWorld = safeName(worldName) ?: return Materialized.Failed(IllegalArgumentException("Illegal world name '$worldName'"))
         if (safeWorld.lowercase(Locale.ROOT) in protectedNames) {
             return Materialized.Failed(IllegalStateException("'$safeWorld' is a loaded/main world and cannot be used as an arena runtime copy"))
         }
 
-        return NameLocks.with(NameLocks.tpl(safeArena)) {
+        return NameLocks.with(NameLocks.tpl(safeTemplate)) {
             NameLocks.with(NameLocks.rt(safeWorld)) {
                 try {
-                    var template = find(safeArena)
+                    var template = find(safeTemplate)
                     var imported = false
                     if (template == null && settings.importFromRoot) {
-                        val legacy = legacyRootWorld(safeArena)
-                        if (legacy != null && safeArena.lowercase(Locale.ROOT) !in protectedNames && !FileOps.hasAnyMarker(legacy)) {
-                            template = importLegacy(safeArena, legacy)
+                        val legacy = legacyRootWorld(safeTemplate)
+                        if (legacy != null && safeTemplate.lowercase(Locale.ROOT) !in protectedNames && !FileOps.hasAnyMarker(legacy)) {
+                            template = importLegacy(safeTemplate, legacy)
                             imported = true
                         }
                     }
@@ -310,8 +322,17 @@ class WorldStore(
         pendingSaves.remove(key(name))
     }
 
-    /** True while the library entry for [name] is about to be replaced. Entries older than 3 minutes are ignored. */
+    /**
+     * True while the library entry for [name] (or the map it is an alias of) is about to be replaced.
+     * Entries older than 3 minutes are ignored.
+     */
     fun hasPendingSave(name: String): Boolean {
+        if (pendingSaveOf(name)) return true
+        val t = templateNameFor(name)
+        return !t.equals(name, ignoreCase = true) && pendingSaveOf(t)
+    }
+
+    private fun pendingSaveOf(name: String): Boolean {
         val since = pendingSaves[key(name)] ?: return false
         if (System.currentTimeMillis() - since > 180_000L) {
             pendingSaves.remove(key(name))
@@ -420,7 +441,7 @@ class WorldStore(
      * BedWars1058's own adapter, which is already in flight when this plugin starts.
      */
     fun exportAsZip(arenaName: String, dest: Path): Boolean {
-        val t = find(arenaName) ?: return false
+        val t = find(templateNameFor(arenaName)) ?: return false
         when (t.kind) {
             Kind.FOLDER -> FileOps.zipDirectory(t.path, dest, FileOps.storeSkip)
             Kind.ZIP -> FileOps.copyZipNormalized(t.path, dest)

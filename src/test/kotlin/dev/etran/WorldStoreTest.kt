@@ -1,5 +1,6 @@
 package dev.etran
 
+import dev.etran.api.MapAliases
 import dev.etran.config.SaveFormat
 import dev.etran.config.StorageSettings
 import dev.etran.storage.FileOps
@@ -482,5 +483,72 @@ class WorldStoreTest {
         assertEquals("z", File(root, "beta/region/r.0.0.mca").readText())
         assertNull(s.find("beta"))
         assertFalse(File(root, ".beta.restoring").exists())
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Map aliases (BedWars1058-MultiGroup variants)
+    // ---------------------------------------------------------------------------------------------
+
+    private fun withAlias(alias: String, target: String, block: () -> Unit) {
+        MapAliases.registerResolver("test") { n -> if (n.equals(alias, ignoreCase = true)) target else null }
+        try {
+            block()
+        } finally {
+            MapAliases.unregisterResolver("test")
+        }
+    }
+
+    @Test
+    fun `an alias loads the map it points to`() {
+        val s = store()
+        makeWorld(File(s.storageDir.toFile(), "lighthouse"), "base-map")
+        s.rescan()
+        assertFalse(s.exists("lighthouse-doubles"))
+        withAlias("lighthouse-doubles", "lighthouse") {
+            assertTrue(s.exists("lighthouse-doubles"))
+            assertTrue(s.exists("LIGHTHOUSE-DOUBLES"))
+            val r = s.materialize("lighthouse-doubles", "lighthouse-doubles", emptySet(), deleteLevelDat = true)
+            assertIs<WorldStore.Materialized.Ready>(r)
+            assertEquals("base-map", File(root, "lighthouse-doubles/region/r.0.0.mca").readText())
+            assertFalse(File(root, "lighthouse-doubles/uid.dat").exists())
+            // the library still holds one map only
+            assertEquals(listOf("lighthouse"), s.names())
+        }
+        // without the alias (and once the runtime copy is gone) the name is unknown again
+        FileOps.deleteRecursively(File(root, "lighthouse-doubles").toPath())
+        assertFalse(s.exists("lighthouse-doubles"))
+    }
+
+    @Test
+    fun `aliases never affect setup, delete or pending saves of the real map`() {
+        val s = store()
+        makeWorld(File(s.storageDir.toFile(), "lighthouse"), "base-map")
+        s.rescan()
+        withAlias("lighthouse-doubles", "lighthouse") {
+            // deleting the alias name must not delete the map it points to
+            assertFalse(s.delete("lighthouse-doubles"))
+            assertNotNull(s.find("lighthouse"))
+            // setup of the alias name works on its own (new, empty) map, never on the target
+            val r = s.materialize("lighthouse-doubles", "lighthouse-doubles", emptySet(), deleteLevelDat = false, setup = true)
+            assertIs<WorldStore.Materialized.Missing>(r)
+            // a pending save of the real map holds back its aliases too
+            s.beginPendingSave("lighthouse")
+            assertTrue(s.hasPendingSave("lighthouse-doubles"))
+            s.endPendingSave("lighthouse")
+            assertFalse(s.hasPendingSave("lighthouse-doubles"))
+        }
+    }
+
+    @Test
+    fun `an alias to a map still in the server root imports that map once`() {
+        val s = store()
+        makeWorld(File(root, "lighthouse"), "root-map")
+        withAlias("lighthouse-doubles", "lighthouse") {
+            val r = s.materialize("lighthouse-doubles", "lighthouse-doubles", emptySet(), deleteLevelDat = true)
+            assertIs<WorldStore.Materialized.Ready>(r)
+            assertTrue(r.importedFromRoot)
+            assertNotNull(s.find("lighthouse"))
+            assertNull(s.find("lighthouse-doubles"))
+        }
     }
 }
