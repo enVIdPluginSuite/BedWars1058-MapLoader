@@ -106,7 +106,10 @@ class LoaderRestoreAdapter(
                 }
             } else {
                 runtime.unloadAndDelete(worldName)
-                bw.syncLater(80L) { reenter(arenaName) }
+                // with several instances per arena another game may already be waiting for players
+                if (bw.arenaUtil.canAutoScale(arenaName)) {
+                    bw.syncLater(80L) { reenter(arenaName) }
+                }
             }
         }
     }
