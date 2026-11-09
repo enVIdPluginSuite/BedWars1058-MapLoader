@@ -237,6 +237,7 @@ class WorldStore(
                             Kind.FOLDER -> FileOps.copyDirectory(template.path, target.toPath(), skip)
                             Kind.ZIP -> FileOps.unzip(template.path, target.toPath(), skip)
                         }
+                        WorldLayout.normalize(target)
                         Materialized.Ready(target, imported)
                     }
                 } catch (ex: Exception) {

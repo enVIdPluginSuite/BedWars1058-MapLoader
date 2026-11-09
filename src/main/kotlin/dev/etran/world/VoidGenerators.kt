@@ -24,7 +24,7 @@ object VoidGenerators {
         } catch (ex: ClassNotFoundException) {
             false
         }
-        val className = if (modernApi) "dev.bwworldloader.world.ModernVoidGenerator" else "dev.bwworldloader.world.LegacyVoidGenerator"
+        val className = if (modernApi) "dev.etran.world.ModernVoidGenerator" else "dev.etran.world.LegacyVoidGenerator"
         return try {
             Class.forName(className).getDeclaredConstructor().newInstance() as ChunkGenerator
         } catch (t: Throwable) {

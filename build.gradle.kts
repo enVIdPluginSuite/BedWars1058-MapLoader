@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "dev.etran"
-version = "3.7.0"
+version = "3.8.0"
 
 val bw1058Version: String by project
 
@@ -106,9 +106,9 @@ tasks.shadowJar {
 
     // Kotlin's stdlib is not provided by Bukkit servers (and Spigot's library loader does not exist
     // before 1.16.5), so we shade and relocate it to avoid clashing with other Kotlin plugins.
-    relocate("kotlin", "dev.bwworldloader.libs.kotlin")
-    relocate("org.jetbrains.annotations", "dev.bwworldloader.libs.jb.annotations")
-    relocate("org.intellij.lang.annotations", "dev.bwworldloader.libs.intellij.annotations")
+    relocate("kotlin", "dev.etran.libs.kotlin")
+    relocate("org.jetbrains.annotations", "dev.etran.libs.jb.annotations")
+    relocate("org.intellij.lang.annotations", "dev.etran.libs.intellij.annotations")
 
     // NOTE: do NOT enable minimize(): the generator classes are loaded by name via reflection.
     exclude("META-INF/*.kotlin_module", "META-INF/maven/**", "META-INF/versions/**")
