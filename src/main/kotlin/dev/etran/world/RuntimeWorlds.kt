@@ -41,7 +41,7 @@ class RuntimeWorlds(
     fun adopt(worldName: String) {
         markOwned(worldName)
         io.submit {
-            val dir = File(serverRoot, worldName)
+            val dir = dev.etran.storage.WorldLayout.worldDir(worldName, serverRoot)
             if (dir.isDirectory) File(dir, FileOps.MARKER).writeText(System.currentTimeMillis().toString())
         }
     }
@@ -93,7 +93,7 @@ class RuntimeWorlds(
      * Only folders that carry our marker are touched (setup worlds only with [includeSetup]), so a real map or the main world is never at risk.
      */
     fun deleteMarkedCopy(worldName: String, includeSetup: Boolean = false) {
-        val dir = File(serverRoot, worldName)
+        val dir = dev.etran.storage.WorldLayout.worldDir(worldName, serverRoot)
         val marked = File(dir, FileOps.MARKER).exists() || (includeSetup && File(dir, FileOps.SETUP_MARKER).exists())
         if (!marked) return
         io.submit {
@@ -121,7 +121,7 @@ class RuntimeWorlds(
         if (!isOwned(worldName)) return false
         return NameLocks.with(NameLocks.rt(worldName)) {
             try {
-                val dir = File(serverRoot, worldName)
+                val dir = dev.etran.storage.WorldLayout.worldDir(worldName, serverRoot)
                 val setupMarker = File(dir, FileOps.SETUP_MARKER)
                 if (setupMarker.exists() && !allowSetup) return@with false
                 if (unloadedAt != null) {
@@ -145,7 +145,7 @@ class RuntimeWorlds(
      */
     fun sweepOrphans(keep: Set<String>): Int {
         val loaded = Bukkit.getWorlds().map { it.name.lowercase(Locale.ROOT) }.toSet()
-        val kids = serverRoot.listFiles() ?: return 0
+        val kids = dev.etran.storage.WorldLayout.runtimeContainers(serverRoot).flatMap { it.listFiles()?.toList() ?: emptyList() }
         var removed = 0
         for (d in kids) {
             if (!d.isDirectory) continue

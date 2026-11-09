@@ -298,8 +298,8 @@ class LoaderRestoreAdapter(
                     // still loaded: leave the folder, but demote it to an ordinary disposable copy
                     log.warning("World '$worldName' could not be unloaded; its folder is removed on the next start.")
                     try {
-                        File(File(serverRoot, worldName), FileOps.SETUP_MARKER).delete()
-                        File(File(serverRoot, worldName), FileOps.MARKER).writeText(System.currentTimeMillis().toString())
+                        File(dev.etran.storage.WorldLayout.worldDir(worldName, serverRoot), FileOps.SETUP_MARKER).delete()
+                        File(dev.etran.storage.WorldLayout.worldDir(worldName, serverRoot), FileOps.MARKER).writeText(System.currentTimeMillis().toString())
                     } catch (ex: Exception) {
                         log.warning("Could not update the marker of '$worldName': ${ex.message}")
                     }

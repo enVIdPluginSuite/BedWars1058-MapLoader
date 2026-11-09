@@ -199,7 +199,7 @@ class WorldStore(
                         }
                     }
                     val rootTarget = File(serverRoot, safeWorld)
-                    val foreign = setup && rootTarget.isDirectory && !FileOps.hasAnyMarker(rootTarget)
+                    val foreign = !WorldLayout.modernServer && setup && rootTarget.isDirectory && !FileOps.hasAnyMarker(rootTarget)
                     if (foreign && template == null && FileOps.isWorldFolder(rootTarget)) {
                         // /bw setupArena on a world that only exists as a plain folder in the root: just use it.
                         // It is saved into the library when the session ends.
@@ -215,7 +215,7 @@ class WorldStore(
                     if (template == null) {
                         Materialized.Missing(storageDir.toString())
                     } else {
-                        val target = File(serverRoot, safeWorld)
+                        val target = WorldLayout.worldDir(safeWorld, serverRoot)
                         // Never delete anything we did not create: a world with unsaved setup work, or a real
                         // world of the admin's that happens to share the arena's name, stays untouched.
                         if (target.exists()) {
@@ -261,7 +261,7 @@ class WorldStore(
         val safeTemplate = safeName(name) ?: throw IllegalArgumentException("Illegal map name '$name'")
         return NameLocks.with(NameLocks.tpl(safeTemplate)) {
             NameLocks.with(NameLocks.rt(safeWorld)) {
-                val src = File(serverRoot, safeWorld)
+                val src = WorldLayout.worldDir(safeWorld, serverRoot)
                 require(FileOps.isWorldFolder(src)) { "World folder '$safeWorld' does not exist" }
                 ensureStorageDir()
                 val keep = if (forceBackup) maxOf(settings.backupsToKeep, 1) else settings.backupsToKeep
