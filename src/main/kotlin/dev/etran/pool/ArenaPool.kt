@@ -65,6 +65,27 @@ class ArenaPool(
     private val pending = ArrayList<PendingJoin>()
 
     /**
+     * Decides whether an idle arena may be put to sleep: only arenas whose map this plugin can load again (library,
+     * root import or an alias) are. Anything else would come back as a normal load a moment later and be put to
+     * sleep again, over and over. Set by the plugin.
+     */
+    var sleepable: (IArena) -> Boolean = { true }
+
+    /** arena names that went through [unloadIdle] but were restarted by another adapter: never put to sleep again */
+    private val unsleepable = HashSet<String>()
+
+    /** arenas we put to sleep that have not been seen coming back through the enable queue yet */
+    private val sleptKeys = HashSet<String>()
+
+    /** the arena name that is being put to sleep right now, cleared by [restartHandled] */
+    private var sleeping: String? = null
+
+    /** Called by our restore adapter at the start of every `onRestart`. */
+    fun restartHandled(arenaName: String) {
+        if (sleeping.equals(arenaName, ignoreCase = true)) sleeping = null
+    }
+
+    /**
      * Set by `/bwloader sleep`: the warm pool is not topped up again until a player asks for an arena (or the
      * settings change), otherwise the arenas that were just put to sleep would be woken straight away.
      */
@@ -145,13 +166,25 @@ class ArenaPool(
             hideListed(wasCold.arena)
             forced.remove(key)
             expectParking.remove(key)
+            sleptKeys.remove(key)
             return false
         }
         if (forced.remove(key)) {
             expectParking.remove(key)
+            sleptKeys.remove(key)
             return false
         }
-        return expectParking.remove(key)
+        if (expectParking.remove(key)) {
+            sleptKeys.remove(key)
+            return true
+        }
+        if (sleptKeys.remove(key)) {
+            // we put this arena to sleep, yet it came back through the queue as a plain load: parking is not possible
+            // for it (nobody announced it). Stop sleeping it, or it would be loaded and unloaded in an endless loop.
+            unsleepable += key
+            log.warning("Arena '${a.arenaName}' came back from sleep as a normal load; it is excluded from idle sleep.")
+        }
+        return false
     }
 
     fun park(a: IArena) {
@@ -435,6 +468,7 @@ class ArenaPool(
             if (a in listed) continue
             alive += a
             val key = a.arenaName.lowercase(Locale.ROOT)
+            if (key in unsleepable || !sleepable(a)) continue
             val busy = a.status != GameState.waiting || a.players.isNotEmpty() || a.spectators.isNotEmpty() ||
                 a in loading || pending.any { it.arenaKey == key }
             if (busy) {
@@ -449,11 +483,23 @@ class ArenaPool(
             var open = openCount(g)
             for ((a, _) in list.sortedBy { it.second }) {
                 if (open <= effectiveWarm(g)) break
+                val key = a.arenaName.lowercase(Locale.ROOT)
                 log.info("Putting idle arena '${a.arenaName}' to sleep (unused for ${seconds}+ s).")
                 lastBusy.remove(a)
                 open--
                 try {
+                    sleeping = a.arenaName
+                    sleptKeys += key
                     a.restart() // BedWars -> our adapter: world is unloaded and deleted, the arena is parked (and listed) again
+                    if (sleeping != null) {
+                        // another restore adapter (e.g. an add-on in front of ours) handled the restart and will load the
+                        // arena for real again: stop trying to sleep it, that would only create a load/unload loop
+                        sleeping = null
+                        sleptKeys.remove(key)
+                        unsleepable += key
+                        log.warning("Arena '${a.arenaName}' was restarted by another restore adapter, so it cannot be parked. " +
+                            "It is excluded from idle sleep. (BedWars1058-MultiGroup variants need its map-alias hook: update both plugins.)")
+                    }
                 } catch (t: Throwable) {
                     log.warning("Could not unload idle arena '${a.arenaName}': ${t.message}")
                 }

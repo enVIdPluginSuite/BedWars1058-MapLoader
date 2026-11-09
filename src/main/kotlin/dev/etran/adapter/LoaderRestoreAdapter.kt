@@ -85,6 +85,7 @@ class LoaderRestoreAdapter(
     }
 
     override fun onRestart(a: IArena) {
+        pool.restartHandled(a.arenaName)
         val arenaName = a.arenaName
         val worldName = a.worldName
         bw.sync {

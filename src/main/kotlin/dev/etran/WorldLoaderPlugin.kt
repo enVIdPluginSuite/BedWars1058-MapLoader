@@ -178,6 +178,7 @@ class WorldLoaderPlugin : JavaPlugin() {
             }
         }
         val pool = ArenaPool(bw, settings, logger)
+        pool.sleepable = { a -> store.exists(a.arenaName) }
         val activator = WorldActivator(bw, store, runtime, pool, io, settings, logger)
         val adapter = LoaderRestoreAdapter(this, bw, store, runtime, pool, activator, io, settings, server.worldContainer, logger)
         activator.isSetupWorld = { name -> adapter.isSetupWorld(name) }
