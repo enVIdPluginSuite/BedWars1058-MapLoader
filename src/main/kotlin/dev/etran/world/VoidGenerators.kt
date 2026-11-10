@@ -7,13 +7,11 @@ import java.util.Random
 import java.util.logging.Logger
 
 /**
- * Chunk generator for pieces of a map that were never built: they come out as void instead of vanilla terrain,
- * exactly like BedWars1058's own void generator.
+ * Void chunk generator for parts of a map that were never built (exactly like BedWars1058's own adapter).
  *
- * The Bukkit chunk generator API changed in 1.13, and we compile against 1.8, so there are two implementations:
- *  - [LegacyVoidGenerator] for 1.8 - 1.12 (lives here, compiled against the 1.8 API)
- *  - `ModernVoidGenerator` for 1.13+ (separate source set, compiled against a newer API)
- * The right one is picked and loaded by name at runtime, so the JVM never tries to resolve the other.
+ * The chunk generator API changed in 1.13 and this plugin compiles against 1.8, so there are two implementations:
+ * [LegacyVoidGenerator] (1.8 - 1.12, here) and `ModernVoidGenerator` (1.13+, separate source set). The right one is
+ * loaded by name, so the JVM never has to resolve the other.
  */
 object VoidGenerators {
 
@@ -24,7 +22,8 @@ object VoidGenerators {
         } catch (ex: ClassNotFoundException) {
             false
         }
-        val className = if (modernApi) "dev.bwworldloader.world.ModernVoidGenerator" else "dev.bwworldloader.world.LegacyVoidGenerator"
+        val pkg = VoidGenerators::class.java.name.substringBeforeLast('.')
+        val className = if (modernApi) "$pkg.ModernVoidGenerator" else "$pkg.LegacyVoidGenerator"
         return try {
             Class.forName(className).getDeclaredConstructor().newInstance() as ChunkGenerator
         } catch (t: Throwable) {

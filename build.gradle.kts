@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "dev.etran"
-version = "3.8.3"
+version = "3.8.4"
 
 val bw1058Version: String by project
 
