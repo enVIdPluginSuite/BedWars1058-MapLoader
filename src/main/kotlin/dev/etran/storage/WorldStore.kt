@@ -223,9 +223,15 @@ class WorldStore(
                                 File(target, FileOps.SETUP_MARKER).exists() -> return@with Materialized.Failed(
                                     UnsafeTargetException("'$safeWorld' in the server root holds unsaved /bw setupArena work; it is kept (it is saved into the library on the next start)"))
                                 File(target, FileOps.MARKER).exists() -> FileOps.deleteRecursively(target.toPath())
-                                else -> return@with Materialized.Failed(
-                                    UnsafeTargetException("A folder called '$safeWorld' already exists in the server root and was not created by this plugin; " +
-                                        "it was not touched. Run /bwloader migrate to move it into the library, or remove it."))
+                                else -> {
+                                    // The library copy is the source of truth and this folder has no marker of ours (a
+                                    // leftover of a crash, or a world something else created): keep it as a backup,
+                                    // never delete it, and carry on.
+                                    val aside = backupDir(safeWorld).resolve("stray-world-" + System.currentTimeMillis())
+                                    aside.parent.toFile().mkdirs()
+                                    FileOps.moveDirectory(target.toPath(), aside)
+                                    log.warning("'${target.path}' was not created by this plugin; moved it to '$aside'.")
+                                }
                             }
                         }
                         target.mkdirs()

@@ -381,7 +381,7 @@ class WorldStoreTest {
     }
 
     @Test
-    fun `materialize refuses to overwrite unsaved setup work or a foreign world`() {
+    fun `materialize keeps unsaved setup work and backs up a foreign world`() {
         val s = storeKeeping(3)
         makeWorld(File(root, "lib/alpha"), "stored")
         s.rescan()
@@ -392,12 +392,14 @@ class WorldStoreTest {
         val failed = assertIs<WorldStore.Materialized.Failed>(r1)
         assertIs<dev.etran.storage.UnsafeTargetException>(failed.error)
         assertEquals("unsaved", File(root, "alpha/region/r.0.0.mca").readText())
-        // an unrelated world of the admin with the same name (no marker)
+        // a folder with the same name but no marker (leftover or foreign): the library copy wins, the folder is kept
+        // as a backup instead of being deleted or blocking the arena
         FileOps.deleteRecursively(File(root, "alpha").toPath())
         makeWorld(File(root, "alpha"), "admins-own-world")
-        val r2 = s.materialize("alpha", "alpha", emptySet(), true)
-        assertIs<dev.etran.storage.UnsafeTargetException>(assertIs<WorldStore.Materialized.Failed>(r2).error)
-        assertEquals("admins-own-world", File(root, "alpha/region/r.0.0.mca").readText())
+        assertIs<WorldStore.Materialized.Ready>(s.materialize("alpha", "alpha", emptySet(), true))
+        assertEquals("stored", File(root, "alpha/region/r.0.0.mca").readText())
+        val kept = root.walkTopDown().any { it.isFile && it.name == "r.0.0.mca" && it.readText() == "admins-own-world" }
+        assertTrue(kept, "the folder that was in the way must be kept as a backup")
         // a disposable runtime copy is replaced as before
         FileOps.deleteRecursively(File(root, "alpha").toPath())
         makeWorld(File(root, "alpha"), "stale")
